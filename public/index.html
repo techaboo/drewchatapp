@@ -639,7 +639,7 @@
         <div class="logo">Techaboo AI Chat</div>
         <div class="model-selector">
           <label for="model-select">Model</label>
-          <select id="model-select"></select>
+          <select id="model-select" aria-label="Select AI model" title="Select AI model"></select>
         </div>
       </div>
       <button id="manage-models-btn" class="btn">Manage Models</button>
@@ -660,7 +660,7 @@
           </div>
           <div class="history-toggle">
             <span>Thread visibility</span>
-            <label>
+            <label for="toggle-archived">
               <input type="checkbox" id="toggle-archived" />
               <span>Show archived</span>
             </label>
@@ -670,7 +670,7 @@
         <div class="prompts">
           <h3>Quick prompts</h3>
           <div class="prompt-grid">
-            <button class="prompt-btn" data-prompt="spell-check">Spell Check & Grammar</button>
+            <button class="prompt-btn" data-prompt="spell-check">Spell Check &amp; Grammar</button>
             <button class="prompt-btn" data-prompt="summarize">Summarize</button>
             <button class="prompt-btn" data-prompt="explain-code">Explain Code</button>
             <button class="prompt-btn" data-prompt="generate-code">Generate Code</button>
@@ -683,10 +683,10 @@
       <section>
         <div class="chat-toolbar">
           <div class="chat-toolbar-left">
-            <label class="file-upload">
+            <label class="file-upload" for="file-input">
               <span>Attach files</span>
-              <input id="file-input" type="file" multiple />
             </label>
+            <input id="file-input" type="file" multiple aria-label="Attach files" />
           </div>
           <div class="toolbar-right"></div>
         </div>
@@ -699,14 +699,14 @@
 
         <div class="composer">
           <div class="prompt-bar">
-            <button class="prompt-btn" data-prompt="spell-check">Spell Check & Grammar</button>
+            <button class="prompt-btn" data-prompt="spell-check">Spell Check &amp; Grammar</button>
             <button class="prompt-btn" data-prompt="summarize">Summarize</button>
             <button class="prompt-btn" data-prompt="explain-code">Explain Code</button>
             <button class="prompt-btn" data-prompt="generate-code">Generate Code</button>
             <button class="prompt-btn" data-prompt="translate">Translate</button>
             <button class="prompt-btn" data-prompt="improve">Improve Writing</button>
           </div>
-          <textarea id="user-input" placeholder="Ask Techaboo anything..." rows="6"></textarea>
+          <textarea id="user-input" placeholder="Ask Techaboo anything..." rows="6" aria-label="Message Techaboo"></textarea>
           <div class="composer-footer">
             <span class="hint">Shift + Enter for newline</span>
             <button id="send-button" class="btn">Send</button>
@@ -717,10 +717,10 @@
       </section>
     </main>
 
-    <div id="model-modal" class="modal" role="dialog" aria-modal="true">
+    <div id="model-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="model-modal-title">
       <div class="modal-content">
         <div class="modal-header">
-          <h2>Manage local models</h2>
+          <h2 id="model-modal-title">Manage local models</h2>
           <button id="close-modal" class="modal-close" aria-label="Close">&times;</button>
         </div>
         <div id="model-list"></div>
