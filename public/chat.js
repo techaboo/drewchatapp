@@ -1,888 +1,1116 @@
-// Techaboo AI Chat enhanced conversation management
+/* global marked, hljs, jspdf */
+
+const STORAGE_KEY = "techaboo.chat.conversations";
+const DRAFT_KEY = "techaboo.chat.draft";
+const SYSTEM_PROMPTS = {
+  "spell-check": "You are a meticulous copy editor. Review the text for spelling and grammar issues. Explain each correction succinctly.",
+  summarize: "You are a concise assistant. Summarize the main ideas using bullet points and short sentences.",
+  "explain-code": "You are a senior software engineer. Explain the provided code in plain language with clear structure.",
+  "generate-code": "You are a pragmatic AI pair programmer. Generate clean, well-commented code that solves the task.",
+  translate: "You are a professional translator. Translate the text while preserving tone and nuance.",
+  improve: "You are a writing coach. Improve the clarity and impact of the text while keeping the original voice."
+};
+
+const availablePrompts = document.querySelectorAll(".prompt-btn");
+const conversationList = document.getElementById("conversation-list");
 const chatMessages = document.getElementById("chat-messages");
 const userInput = document.getElementById("user-input");
 const sendButton = document.getElementById("send-button");
-const typingIndicator = document.getElementById("typing-indicator");
+const newChatBtn = document.getElementById("new-chat-btn");
+const copyThreadBtn = document.getElementById("copy-thread-btn");
+const exportMarkdownBtn = document.getElementById("export-markdown-btn");
+const exportPdfBtn = document.getElementById("export-pdf-btn");
 const modelSelect = document.getElementById("model-select");
 const manageModelsBtn = document.getElementById("manage-models-btn");
 const modelModal = document.getElementById("model-modal");
 const closeModalBtn = document.getElementById("close-modal");
 const modelList = document.getElementById("model-list");
+const toggleArchivedCheckbox = document.getElementById("toggle-archived");
+const clearArchivedBtn = document.getElementById("clear-archived-btn");
 const fileInput = document.getElementById("file-input");
 const fileNames = document.getElementById("file-names");
-const conversationList = document.getElementById("conversation-list");
-const newChatBtn = document.getElementById("new-chat-btn");
-const copyThreadBtn = document.getElementById("copy-thread-btn");
-const exportMarkdownBtn = document.getElementById("export-markdown-btn");
-const exportPdfBtn = document.getElementById("export-pdf-btn");
-const toggleArchivedInput = document.getElementById("toggle-archived");
-const historyLabel = document.getElementById("history-label");
-const clearArchivedBtn = document.getElementById("clear-archived-btn");
+const typingIndicator = document.getElementById("typing-indicator");
 
-const STORAGE_KEY = "techaboo.chat.conversations";
-const DEFAULT_TITLE = "New chat";
-const WELCOME_TEXT = "Hello! I'm Techaboo AI Chat. How can I help you today?";
-const WELCOME_MESSAGE = { role: "assistant", content: WELCOME_TEXT };
-
+let isSending = false;
+let selectedConversationId = null;
 let conversations = [];
-let currentConversationId = null;
-let chatHistory = [];
-let uploadedFiles = [];
-let showArchived = false;
+let availableModels = [];
+let selectedModel = null;
+let ollamaAvailable = true;
+let abortController = null;
+let streamReader = null;
+const pendingFileAttachments = [];
 
-window.addEventListener("DOMContentLoaded", () => {
-  initializeConversations();
-  loadModels();
-});
-
-sendButton.addEventListener("click", sendMessage);
-userInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    sendMessage();
+function formatModelSize(bytes) {
+  if (typeof bytes !== "number" || Number.isNaN(bytes) || bytes <= 0) {
+    return null;
   }
-});
-
-if (newChatBtn) {
-  newChatBtn.addEventListener("click", () => {
-    const conversation = createConversation();
-    conversations.push(conversation);
-    saveConversations();
-    showArchived = false;
-    syncArchiveToggle();
-    updateHistoryLabel();
-    setCurrentConversation(conversation.id);
-    updateArchiveControlsState();
-    userInput.focus();
-  });
-}
-
-if (copyThreadBtn) {
-  copyThreadBtn.addEventListener("click", copyActiveConversation);
-}
-
-if (exportMarkdownBtn) {
-  exportMarkdownBtn.addEventListener("click", exportConversationMarkdown);
-}
-
-if (exportPdfBtn) {
-  exportPdfBtn.addEventListener("click", exportConversationPdf);
-}
-
-if (toggleArchivedInput) {
-  toggleArchivedInput.addEventListener("change", () => {
-    showArchived = toggleArchivedInput.checked;
-    updateHistoryLabel();
-    ensureVisibleConversation();
-    renderConversationList();
-  });
-}
-
-if (clearArchivedBtn) {
-  clearArchivedBtn.addEventListener("click", clearArchivedConversations);
-}
-
-manageModelsBtn.addEventListener("click", () => {
-  modelModal.classList.add("show");
-  loadAvailableModels();
-});
-
-closeModalBtn.addEventListener("click", () => {
-  modelModal.classList.remove("show");
-});
-
-window.addEventListener("click", (event) => {
-  if (event.target === modelModal) {
-    modelModal.classList.remove("show");
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = bytes;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
   }
-});
-
-window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    modelModal.classList.remove("show");
-  }
-});
-
-modelSelect.addEventListener("change", async (event) => {
-  try {
-    await fetch("/api/models/select", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: event.target.value })
-    });
-  } catch (error) {
-    console.error("Failed to select model", error);
-  }
-});
-
-fileInput.addEventListener("change", (event) => {
-  uploadedFiles = [];
-  fileNames.innerHTML = "";
-  fileNames.style.display = "none";
-
-  Array.from(event.target.files).forEach((file) => {
-    const reader = new FileReader();
-    reader.onload = (loadEvent) => {
-      uploadedFiles.push({ name: file.name, content: loadEvent.target?.result ?? "" });
-      const tag = document.createElement("span");
-      tag.className = "file-tag";
-      tag.textContent = file.name;
-      fileNames.appendChild(tag);
-      fileNames.style.display = "flex";
-    };
-    reader.readAsText(file);
-  });
-});
-
-const templates = {
-  "spell-check": "Check spelling and grammar:\n\n",
-  summarize: "Summarize the following:\n\n",
-  "explain-code": "Explain this code:\n\n",
-  "generate-code": "Generate code for:\n\n",
-  translate: "Translate this text to [language]:\n\n",
-  improve: "Improve this writing:\n\n"
-};
-
-document.querySelectorAll(".prompt-btn").forEach((button) => {
-  button.addEventListener("click", () => {
-    const template = templates[button.dataset.prompt];
-    if (template) {
-      userInput.value = template;
-      userInput.focus();
-    }
-  });
-});
-
-function initializeConversations() {
-  conversations = loadStoredConversations();
-  if (!conversations.length) {
-    conversations.push(createConversation());
-    saveConversations();
-  }
-  const defaultConversation = conversations.find((item) => !item.archived) ?? conversations[0];
-  currentConversationId = defaultConversation.id;
-  chatHistory = defaultConversation.messages;
-  showArchived = Boolean(defaultConversation.archived);
-  syncArchiveToggle();
-  updateHistoryLabel();
-  updateArchiveControlsState();
-  renderConversationList();
-  renderCurrentConversation();
-}
-
-function loadStoredConversations() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((conversation) => {
-        if (!conversation || !Array.isArray(conversation.messages)) return null;
-        const messages = conversation.messages
-          .map((message) => ({ role: message.role, content: message.content }))
-          .filter((message) => message && typeof message.content === "string");
-        return {
-          id: conversation.id || generateId(),
-          title: conversation.title || DEFAULT_TITLE,
-          messages: messages.length ? messages : [{ ...WELCOME_MESSAGE }],
-          updatedAt: typeof conversation.updatedAt === "number" ? conversation.updatedAt : Date.now(),
-          archived: Boolean(conversation.archived)
-        };
-      })
-      .filter(Boolean);
-  } catch (error) {
-    console.error("Failed to load conversations", error);
-    return [];
-  }
+  return `${size.toFixed(unitIndex === 0 ? 0 : size < 10 ? 1 : 0)} ${units[unitIndex]}`;
 }
 
 function saveConversations() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-  } catch (error) {
-    console.error("Failed to save conversations", error);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+}
+
+function loadConversations() {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (!stored) {
+    const defaultConversation = createNewConversation();
+    conversations = [defaultConversation];
+    selectedConversationId = defaultConversation.id;
+    saveConversations();
+    return;
+  }
+
+  conversations = JSON.parse(stored);
+  if (!Array.isArray(conversations) || conversations.length === 0) {
+    const defaultConversation = createNewConversation();
+    conversations = [defaultConversation];
+    selectedConversationId = defaultConversation.id;
+  } else if (!selectedConversationId) {
+    selectedConversationId = conversations[0].id;
   }
 }
 
-function createConversation() {
+function createNewConversation() {
   return {
-    id: generateId(),
-    title: DEFAULT_TITLE,
-    messages: [{ ...WELCOME_MESSAGE }],
+    id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `conv-${Date.now()}`,
+    title: "New conversation",
+    messages: [],
+    createdAt: Date.now(),
     updatedAt: Date.now(),
     archived: false
   };
 }
 
-function generateId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return "conv-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+function getActiveConversation() {
+  return conversations.find((c) => c.id === selectedConversationId) ?? null;
 }
 
-function getCurrentConversation() {
-  return conversations.find((conversation) => conversation.id === currentConversationId) || null;
+function formatDateHeading(timestamp) {
+  const date = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (
+    date.getDate() === today.getDate() &&
+    date.getMonth() === today.getMonth() &&
+    date.getFullYear() === today.getFullYear()
+  ) {
+    return "Today";
+  }
+
+  if (
+    date.getDate() === yesterday.getDate() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getFullYear() === yesterday.getFullYear()
+  ) {
+    return "Yesterday";
+  }
+
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  });
 }
 
-function setCurrentConversation(conversationId) {
-  const conversation = conversations.find((item) => item.id === conversationId);
-  if (!conversation) return;
-  currentConversationId = conversationId;
-  chatHistory = conversation.messages;
-  if (conversation.archived !== showArchived) {
-    showArchived = conversation.archived;
-    syncArchiveToggle();
-    updateHistoryLabel();
-  }
-  renderConversationList();
-  renderCurrentConversation();
-  typingIndicator.style.display = "none";
-  userInput.value = "";
-  uploadedFiles = [];
-  fileInput.value = "";
-  fileNames.innerHTML = "";
-  fileNames.style.display = "none";
+function formatTime(timestamp) {
+  return new Date(timestamp).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit"
+  });
 }
 
 function renderConversationList() {
-  if (!conversationList) return;
+  const showArchived = toggleArchivedCheckbox.checked;
+  const grouped = conversations
+    .filter((conversation) => !conversation.archived || showArchived)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .reduce((groups, conversation) => {
+      const groupKey = formatDateHeading(conversation.updatedAt);
+      if (!groups[groupKey]) {
+        groups[groupKey] = [];
+      }
+      groups[groupKey].push(conversation);
+      return groups;
+    }, {});
+
   conversationList.innerHTML = "";
 
-  const visible = getVisibleConversations();
-  if (!visible.length) {
-    const empty = document.createElement("p");
-    empty.className = "conversation-meta";
-    empty.textContent = showArchived ? "No archived threads." : "No conversations yet.";
-    conversationList.appendChild(empty);
-    return;
-  }
+  Object.entries(grouped).forEach(([heading, items]) => {
+    const dayHeading = document.createElement("div");
+    dayHeading.className = "conversation-day";
+    dayHeading.textContent = heading;
+    conversationList.appendChild(dayHeading);
 
-  const sorted = [...visible].sort((a, b) => b.updatedAt - a.updatedAt);
-  let currentDayKey = "";
+    items.forEach((conversation) => {
+      const item = document.createElement("div");
+      item.className = "conversation-item";
+      item.dataset.id = conversation.id;
+      item.setAttribute("role", "button");
+      item.setAttribute("tabindex", "0");
+      item.setAttribute("aria-pressed", conversation.id === selectedConversationId);
 
-  sorted.forEach((conversation) => {
-    const dayKey = getDayKey(conversation.updatedAt);
-    if (dayKey !== currentDayKey) {
-      currentDayKey = dayKey;
-      const dayHeading = document.createElement("div");
-      dayHeading.className = "conversation-day";
-      dayHeading.textContent = describeDay(conversation.updatedAt);
-      conversationList.appendChild(dayHeading);
-    }
-
-    const item = document.createElement("div");
-    item.className = "conversation-item" + (conversation.id === currentConversationId ? " active" : "");
-    item.dataset.id = conversation.id;
-
-    const title = document.createElement("div");
-    title.className = "conversation-title";
-    title.textContent = conversation.title || DEFAULT_TITLE;
-
-    const meta = document.createElement("div");
-    meta.className = "conversation-meta";
-    const lastMessage = conversation.messages[conversation.messages.length - 1];
-    const previewContent = lastMessage ? lastMessage.content.replace(/\s+/g, " ") : "";
-    const preview = previewContent ? truncateText(previewContent, 80) : "No messages yet";
-    const timestamp = formatTimestamp(conversation.updatedAt);
-    meta.textContent = timestamp ? timestamp + " • " + preview : preview;
-
-    const actions = document.createElement("div");
-    actions.className = "conversation-actions";
-    const archiveLabel = conversation.archived ? "U" : "A";
-    const archiveTitle = conversation.archived ? "Unarchive" : "Archive";
-    actions.appendChild(createActionButton(archiveLabel, archiveTitle, (event) => {
-      event.stopPropagation();
-      if (conversation.archived) {
-        unarchiveConversation(conversation.id);
-      } else {
-        archiveConversation(conversation.id);
+      if (conversation.id === selectedConversationId) {
+        item.classList.add("active");
       }
-    }));
-    actions.appendChild(createActionButton("X", "Delete", (event) => {
-      event.stopPropagation();
-      deleteConversation(conversation.id);
-    }));
 
-    item.appendChild(title);
-    item.appendChild(meta);
-    item.appendChild(actions);
-    item.addEventListener("click", () => setCurrentConversation(conversation.id));
+      const title = document.createElement("div");
+      title.className = "conversation-title";
+      title.textContent = conversation.title;
 
-    conversationList.appendChild(item);
+      const meta = document.createElement("div");
+      meta.className = "conversation-meta";
+      meta.textContent = `${formatTime(conversation.updatedAt)} · ${conversation.messages.length} message${conversation.messages.length !== 1 ? "s" : ""}`;
+
+      const actions = document.createElement("div");
+      actions.className = "conversation-actions";
+
+      const archiveBtn = createActionButton(conversation.archived ? "U" : "A", conversation.archived ? "Unarchive" : "Archive", () => toggleArchiveConversation(conversation.id));
+      const renameBtn = createActionButton("✎", "Rename", () => promptRenameConversation(conversation.id));
+      const duplicateBtn = createActionButton("⧉", "Duplicate", () => duplicateConversation(conversation.id));
+      const deleteBtn = createActionButton("✕", "Delete", () => deleteConversation(conversation.id));
+
+      if (conversation.archived) {
+        archiveBtn.classList.add("archived");
+        archiveBtn.title = "Unarchive conversation";
+        archiveBtn.setAttribute("aria-label", "Unarchive conversation");
+        archiveBtn.setAttribute("data-archived", "true");
+      }
+
+      actions.append(archiveBtn, renameBtn, duplicateBtn, deleteBtn);
+
+      item.append(title, meta, actions);
+      item.addEventListener("click", () => renderConversation(conversation.id));
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          renderConversation(conversation.id);
+        }
+      });
+
+      conversationList.appendChild(item);
+    });
   });
+
+  clearArchivedBtn.disabled = !conversations.some((c) => c.archived);
 }
 
 function createActionButton(label, title, handler) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "conversation-action";
-  button.title = title;
-  button.textContent = label;
-  button.addEventListener("click", handler);
+  button.title = `${title} conversation`;
+  button.setAttribute("aria-label", `${title} conversation`);
+  button.innerHTML = `<span aria-hidden="true">${label}</span>`;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    handler();
+  });
+  button.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handler();
+    }
+  });
   return button;
 }
 
-function renderCurrentConversation() {
-  const conversation = getCurrentConversation();
-  chatMessages.innerHTML = "";
+function promptRenameConversation(conversationId) {
+  const conversation = conversations.find((c) => c.id === conversationId);
   if (!conversation) return;
-  conversation.messages.forEach((message) => {
-    displayMessage(message.role, message.content);
+
+  const trimmedTitle = (window.prompt("Rename conversation", conversation.title) ?? "").trim();
+  if (!trimmedTitle) return;
+
+  conversation.title = trimmedTitle;
+  conversation.updatedAt = Date.now();
+  saveConversations();
+  renderConversationList();
+  renderConversation(conversationId);
+}
+
+function duplicateConversation(conversationId) {
+  const conversation = conversations.find((c) => c.id === conversationId);
+  if (!conversation) return;
+
+  const clone = {
+    ...structuredClone(conversation),
+    id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `conv-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    title: `${conversation.title} (copy)`,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    archived: false
+  };
+
+  conversations.unshift(clone);
+  selectedConversationId = clone.id;
+  saveConversations();
+  renderConversationList();
+  renderConversation(clone.id);
+}
+
+function deleteConversation(conversationId) {
+  const index = conversations.findIndex((conversation) => conversation.id === conversationId);
+  if (index === -1) return;
+
+  const [removed] = conversations.splice(index, 1);
+  if (!conversations.length) {
+    const freshConversation = createNewConversation();
+    conversations.push(freshConversation);
+    selectedConversationId = freshConversation.id;
+  } else if (removed.id === selectedConversationId) {
+    selectedConversationId = conversations[Math.min(index, conversations.length - 1)].id;
+  }
+
+  saveConversations();
+  renderConversationList();
+  renderConversation(selectedConversationId);
+}
+
+function toggleArchiveConversation(conversationId) {
+  const conversation = conversations.find((c) => c.id === conversationId);
+  if (!conversation) return;
+  conversation.archived = !conversation.archived;
+  conversation.updatedAt = Date.now();
+  saveConversations();
+  if (conversation.archived && conversationId === selectedConversationId) {
+    const firstActive = conversations.find((c) => !c.archived);
+    if (firstActive) {
+      selectedConversationId = firstActive.id;
+    }
+  }
+  renderConversationList();
+  renderConversation(selectedConversationId);
+}
+
+function renderConversation(conversationId) {
+  const conversation = conversations.find((c) => c.id === conversationId);
+  if (!conversation) return;
+
+  selectedConversationId = conversation.id;
+  conversationList.querySelectorAll(".conversation-item").forEach((item) => {
+    const isActive = item.dataset.id === conversation.id;
+    item.classList.toggle("active", isActive);
+    item.setAttribute("aria-pressed", String(isActive));
   });
-  addCopyButtons();
-}
 
-async function loadModels() {
-  try {
-    const response = await fetch("/api/models");
-    const data = await response.json();
-    modelSelect.innerHTML = "";
+  chatMessages.innerHTML = "";
 
-    if (Array.isArray(data.installedModels) && data.installedModels.length) {
-      data.installedModels.forEach((model) => {
-        const option = document.createElement("option");
-        option.value = model.name;
-        option.textContent = model.name + " (" + formatSize(model.size) + ")";
-        modelSelect.appendChild(option);
-      });
-      if (data.currentModel) {
-        modelSelect.value = data.currentModel;
-      }
+  conversation.messages.forEach((message) => {
+    const messageElement = document.createElement("div");
+    messageElement.className = `message ${message.role === "user" ? "user-message" : "assistant-message"}`;
+
+    if (message.role === "assistant") {
+      const parsed = marked.parse(message.content);
+      messageElement.innerHTML = parsed;
+      enhanceCodeBlocks(messageElement);
     } else {
-      const option = document.createElement("option");
-      option.textContent = data.available ? "No local models found" : "Ollama offline";
-      modelSelect.appendChild(option);
+      messageElement.textContent = message.content;
     }
-  } catch (error) {
-    console.error("Failed to load models", error);
-    modelSelect.innerHTML = '<option>Error loading models</option>';
+
+    chatMessages.appendChild(messageElement);
+  });
+
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  updateThreadButtonsState();
+}
+
+function updateThreadButtonsState() {
+  const conversation = getActiveConversation();
+  const hasMessages = Boolean(conversation && conversation.messages.length);
+  if (copyThreadBtn) copyThreadBtn.disabled = !hasMessages;
+  if (exportMarkdownBtn) exportMarkdownBtn.disabled = !hasMessages;
+  if (exportPdfBtn) exportPdfBtn.disabled = !hasMessages;
+}
+
+function enhanceCodeBlocks(container) {
+  if (!window.hljs) return;
+  container.querySelectorAll("pre code").forEach((block) => {
+    window.hljs.highlightElement(block);
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "copy-btn";
+    copyBtn.type = "button";
+    copyBtn.textContent = "Copy";
+    copyBtn.setAttribute("aria-label", "Copy code block");
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(block.textContent ?? "");
+        copyBtn.textContent = "Copied";
+        setTimeout(() => {
+          copyBtn.textContent = "Copy";
+        }, 1500);
+      } catch (error) {
+        console.error("Failed to copy code block", error);
+      }
+    });
+    block.parentElement.appendChild(copyBtn);
+  });
+}
+
+function initializeConversations() {
+  loadConversations();
+  renderConversationList();
+  renderConversation(selectedConversationId);
+  updateThreadButtonsState();
+}
+
+function createMessageElement(role, content) {
+  const messageElement = document.createElement("div");
+  messageElement.className = `message ${role === "user" ? "user-message" : "assistant-message"}`;
+
+  if (role === "assistant") {
+    const parsed = marked.parse(content);
+    messageElement.innerHTML = parsed;
+    enhanceCodeBlocks(messageElement);
+  } else {
+    messageElement.textContent = content;
+  }
+
+  return messageElement;
+}
+
+function appendMessageToConversation(role, content) {
+  const conversation = getActiveConversation();
+  if (!conversation) return;
+  conversation.messages.push({ role, content });
+  conversation.updatedAt = Date.now();
+  saveConversations();
+  updateThreadButtonsState();
+}
+
+function updateConversationTitle(conversation, content) {
+  const firstLine = content.split("\n")[0];
+  conversation.title = firstLine.length > 48 ? `${firstLine.slice(0, 45)}...` : firstLine;
+}
+
+function resetComposer() {
+  userInput.value = "";
+  localStorage.removeItem(DRAFT_KEY);
+  pendingFileAttachments.length = 0;
+  fileNames.innerHTML = "";
+  fileNames.style.display = "none";
+}
+
+async function copyActiveConversation() {
+  const conversation = getActiveConversation();
+  if (!conversation || !conversation.messages.length) return;
+
+  const transcript = conversation.messages
+    .map((message) => `${message.role.toUpperCase()}:\n${message.content}`)
+    .join("\n\n");
+
+  await navigator.clipboard.writeText(transcript);
+  if (copyThreadBtn) {
+    const previous = copyThreadBtn.textContent;
+    copyThreadBtn.textContent = "Copied";
+    setTimeout(() => {
+      if (copyThreadBtn) {
+        copyThreadBtn.textContent = previous;
+      }
+    }, 1600);
   }
 }
 
-async function loadAvailableModels() {
+function exportConversationMarkdown() {
+  const conversation = getActiveConversation();
+  if (!conversation || !conversation.messages.length) return;
+
+  const transcript = conversation.messages
+    .map((message) => `### ${message.role.toUpperCase()}\n\n${message.content}`)
+    .join("\n\n");
+
+  const blob = new Blob([`# ${conversation.title}\n\n${transcript}`], {
+    type: "text/markdown"
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${conversation.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-techaboo.md`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function exportConversationPdf() {
+  const conversation = getActiveConversation();
+  if (!conversation || !conversation.messages.length) return;
+
+  const doc = new jspdf.jsPDF({ unit: "pt", format: "letter" });
+  const margin = 40;
+  const maxWidth = 552;
+  let y = margin;
+
+  doc.setFontSize(18);
+  doc.text(conversation.title, margin, y);
+  y += 24;
+
+  doc.setFontSize(12);
+  conversation.messages.forEach((message) => {
+    doc.setFont(undefined, "bold");
+    doc.text(`${message.role.toUpperCase()}:`, margin, y);
+    y += 18;
+
+    doc.setFont(undefined, "normal");
+    const lines = doc.splitTextToSize(message.content, maxWidth);
+    doc.text(lines, margin, y);
+    y += lines.length * 14 + 16;
+
+    if (y > doc.internal.pageSize.getHeight() - margin) {
+      doc.addPage();
+      y = margin;
+    }
+  });
+
+  doc.save(`${conversation.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-techaboo.pdf`);
+}
+
+function clearArchivedConversations() {
+  conversations = conversations.filter((conversation) => !conversation.archived);
+  if (!conversations.some((conversation) => conversation.id === selectedConversationId)) {
+    const freshConversation = createNewConversation();
+    conversations.unshift(freshConversation);
+    selectedConversationId = freshConversation.id;
+  }
+  saveConversations();
+  renderConversationList();
+  renderConversation(selectedConversationId);
+}
+
+function addMessageToDOM(role, content) {
+  const element = createMessageElement(role, content);
+  chatMessages.appendChild(element);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function updateLastAssistantMessage(content) {
+  const nodes = [...chatMessages.querySelectorAll(".assistant-message")];
+  const lastMessage = nodes.at(-1);
+  if (!lastMessage) return;
+  const parsed = marked.parse(content);
+  lastMessage.innerHTML = parsed;
+  enhanceCodeBlocks(lastMessage);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function persistDraft() {
+  localStorage.setItem(DRAFT_KEY, userInput.value);
+}
+
+function restoreDraft() {
+  const storedDraft = localStorage.getItem(DRAFT_KEY);
+  if (storedDraft) {
+    userInput.value = storedDraft;
+  }
+}
+
+function applyPromptTemplate(key) {
+  const prompt = SYSTEM_PROMPTS[key];
+  if (!prompt) return;
+
+  userInput.value = `${prompt}\n\n${userInput.value}`.trim();
+  userInput.focus();
+  persistDraft();
+}
+
+function renderFileAttachments() {
+  if (!pendingFileAttachments.length) {
+    fileNames.innerHTML = "";
+    fileNames.style.display = "none";
+    return;
+  }
+
+  fileNames.innerHTML = "";
+  pendingFileAttachments.forEach((file) => {
+    const tag = document.createElement("span");
+    tag.className = "file-tag";
+    tag.textContent = `${file.name} (${Math.round(file.size / 1024)} KB)`;
+    fileNames.appendChild(tag);
+  });
+
+  fileNames.style.display = "flex";
+}
+
+async function handleFileSelection(event) {
+  if (!event.target.files) return;
+
+  pendingFileAttachments.length = 0;
+  for (const file of event.target.files) {
+    if (file.size > 2 * 1024 * 1024) {
+      window.alert(`Skipping ${file.name} — max file size is 2MB.`);
+      continue;
+    }
+
+    const text = await file.text();
+    pendingFileAttachments.push({ name: file.name, content: text, size: file.size });
+  }
+
+  renderFileAttachments();
+}
+
+async function sendMessage() {
+  if (isSending) return;
+
+  const trimmed = userInput.value.trim();
+  if (!trimmed && !pendingFileAttachments.length) {
+    return;
+  }
+
+  const conversation = getActiveConversation();
+  if (!conversation) return;
+
+  const userContent = [trimmed, ...pendingFileAttachments.map((file) => `\n\n\n---\nFile: ${file.name}\n\n\n${file.content}`)]
+    .join("\n").trim();
+
+  if (!userContent) return;
+
+  isSending = true;
+  sendButton.disabled = true;
+  typingIndicator.classList.add("visible");
+
+  appendMessageToConversation("user", userContent);
+  addMessageToDOM("user", userContent);
+  updateConversationTitle(conversation, userContent);
+
+  const assistantPlaceholder = "";
+  appendMessageToConversation("assistant", assistantPlaceholder);
+  addMessageToDOM("assistant", assistantPlaceholder);
+
+  abortController = new AbortController();
+  const { signal } = abortController;
+
+  const payload = {
+    messages: conversation.messages.map((message) => ({
+      role: message.role,
+      content: message.content
+    })),
+    model: selectedModel
+  };
+
   try {
-    const response = await fetch("/api/models");
-    const data = await response.json();
-    modelList.innerHTML = "";
+    streamReader = await fetch(`/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal
+    });
 
-    if (Array.isArray(data.installedModels) && data.installedModels.length) {
-      const heading = document.createElement("h3");
-      heading.textContent = "Installed";
-      modelList.appendChild(heading);
-      data.installedModels.forEach((model) => {
-        modelList.appendChild(createCard(model, true));
-      });
+    if (!streamReader.ok || !streamReader.body) {
+      throw new Error(`Request failed: ${streamReader.status}`);
     }
 
-    if (Array.isArray(data.availableModels) && data.availableModels.length) {
-      const heading = document.createElement("h3");
-      heading.textContent = "Available";
-      modelList.appendChild(heading);
-      data.availableModels.forEach((model) => {
-        const alreadyInstalled = data.installedModels && data.installedModels.some((item) => item.name === model.name);
-        if (!alreadyInstalled) {
-          modelList.appendChild(createCard(model, false));
+    const reader = streamReader.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let newlineIndex;
+      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+        const chunk = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (!chunk) continue;
+
+        const data = JSON.parse(chunk);
+        if (data.event === "completion" || data.response || data.text) {
+          const text = data.text ?? data.response ?? "";
+          updateLastAssistantMessage(text);
+          const assistantMessage = getActiveConversation()?.messages.at(-1);
+          if (assistantMessage) {
+            assistantMessage.content = text;
+            assistantMessage.streaming = true;
+            saveConversations();
+          }
         }
-      });
+      }
+    }
+
+    const finalAssistantMessage = getActiveConversation()?.messages.at(-1);
+    if (finalAssistantMessage) {
+      finalAssistantMessage.streaming = false;
+      saveConversations();
     }
   } catch (error) {
-    console.error("Failed to load available models", error);
+    console.error("Error sending message", error);
+    const assistantMessage = getActiveConversation()?.messages.at(-1);
+    if (assistantMessage) {
+      assistantMessage.content = "Sorry, something went wrong. Please try again.";
+      updateLastAssistantMessage(assistantMessage.content);
+      saveConversations();
+    }
+  } finally {
+    isSending = false;
+    sendButton.disabled = false;
+    typingIndicator.classList.remove("visible");
+    resetComposer();
+    renderConversationList();
+    renderConversation(selectedConversationId);
   }
 }
 
-function createCard(model, installed) {
+function handleConversationItemClick(event) {
+  const target = event.target.closest(".conversation-item");
+  if (!target) return;
+  const conversationId = target.dataset.id;
+  renderConversation(conversationId);
+}
+
+function handleConversationItemKeydown(event) {
+  const target = event.target.closest(".conversation-item");
+  if (!target) return;
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    const conversationId = target.dataset.id;
+    renderConversation(conversationId);
+  }
+}
+
+function createFreshConversation() {
+  const newConversation = createNewConversation();
+  conversations.unshift(newConversation);
+  selectedConversationId = newConversation.id;
+  saveConversations();
+  renderConversationList();
+  renderConversation(selectedConversationId);
+  resetComposer();
+  userInput.focus();
+}
+
+function updateThreadButtonsStateOnListChange() {
+  updateThreadButtonsState();
+}
+
+async function fetchModels() {
+  try {
+    const response = await fetch(`/api/models`);
+    if (!response.ok) {
+      throw new Error(`Models request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    ollamaAvailable = Boolean(data.available);
+
+    if (!ollamaAvailable) {
+      availableModels = [];
+      selectedModel = null;
+      renderModelOptions();
+      renderModelList();
+      return;
+    }
+
+    const installed = Array.isArray(data.installedModels) ? data.installedModels : [];
+    const downloadable = Array.isArray(data.availableModels) ? data.availableModels : [];
+    const inventory = new Map();
+
+    installed.forEach((model) => {
+      const formattedSize = formatModelSize(model.size);
+      inventory.set(model.name, {
+        id: model.name,
+        label: model.name,
+        availableLocally: true,
+        formattedSize,
+        rawSize: typeof model.size === "number" ? model.size : undefined,
+        description: model.description ?? ""
+      });
+    });
+
+    downloadable.forEach((model) => {
+      const existing = inventory.get(model.name) ?? {
+        id: model.name,
+        label: model.name,
+        availableLocally: false,
+        formattedSize: null,
+        rawSize: undefined,
+        description: ""
+      };
+      if (typeof model.size === "number") {
+        existing.rawSize = model.size;
+        existing.formattedSize = formatModelSize(model.size);
+      }
+      if (model.description) {
+        existing.description = model.description;
+      }
+      inventory.set(model.name, existing);
+    });
+
+    availableModels = Array.from(inventory.values()).sort((a, b) => a.label.localeCompare(b.label));
+
+    const active = typeof data.currentModel === "string" ? data.currentModel : installed[0]?.name ?? null;
+    selectedModel = active;
+
+    renderModelOptions();
+    renderModelList();
+  } catch (error) {
+    console.error("Failed to fetch models", error);
+    ollamaAvailable = false;
+    availableModels = [];
+    selectedModel = null;
+    renderModelOptions();
+    renderModelList();
+  }
+}
+
+function renderModelOptions() {
+  modelSelect.innerHTML = "";
+
+  if (!ollamaAvailable) {
+    const option = document.createElement("option");
+    option.textContent = "Ollama offline";
+    modelSelect.appendChild(option);
+    modelSelect.disabled = true;
+    return;
+  }
+
+  const installed = availableModels.filter((model) => model.availableLocally);
+  if (!installed.length) {
+    const option = document.createElement("option");
+    option.textContent = "No local models";
+    modelSelect.appendChild(option);
+    modelSelect.disabled = true;
+    return;
+  }
+
+  installed.forEach((model) => {
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = model.formattedSize ? `${model.label} (${model.formattedSize})` : model.label;
+    if (model.id === selectedModel) {
+      option.selected = true;
+    }
+    modelSelect.appendChild(option);
+  });
+
+  if (!installed.some((model) => model.id === selectedModel)) {
+    selectedModel = installed[0]?.id ?? null;
+  }
+
+  modelSelect.disabled = false;
+}
+
+async function selectModel(modelId) {
+  try {
+    const response = await fetch(`/api/models/select`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: modelId })
+    });
+    if (!response.ok) {
+      throw new Error(`Model selection failed: ${response.status}`);
+    }
+    selectedModel = modelId;
+    renderModelOptions();
+    renderModelList();
+  } catch (error) {
+    console.error("Failed to select model", error);
+  }
+}
+
+function openModelModal() {
+  renderModelList();
+  modelModal.classList.add("show");
+  modelModal.focus();
+}
+
+function closeModelModal() {
+  modelModal.classList.remove("show");
+}
+
+async function downloadModel(modelId) {
+  const response = await fetch(`/api/models/download`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: modelId })
+  });
+
+  if (!response.body) {
+    throw new Error("Download stream missing");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+      const chunk = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (!chunk) continue;
+
+      const data = JSON.parse(chunk);
+      if (typeof data.progress === "number") {
+        updateModelProgress(modelId, data.progress);
+      } else if (typeof data.completed === "number" && typeof data.total === "number" && data.total > 0) {
+        updateModelProgress(modelId, data.completed / data.total);
+      }
+      if (data.status === "success") {
+        updateModelProgress(modelId, 1);
+      }
+      if (data.status === "error") {
+        throw new Error(data.error ?? "Download failed");
+      }
+    }
+  }
+
+  await fetchModels();
+}
+
+function updateModelProgress(modelId, progress) {
+  const card = modelList.querySelector(`[data-model-id="${CSS.escape(modelId)}"]`);
+  const progressBar = card?.querySelector(".progress-bar");
+  if (!progressBar) return;
+  const clamped = Math.min(Math.max(progress, 0), 1);
+  progressBar.style.width = `${Math.floor(clamped * 100)}%`;
+}
+
+function renderModelList() {
+  modelList.innerHTML = "";
+
+  if (!ollamaAvailable) {
+    const message = document.createElement("p");
+    message.textContent = "Ollama is offline. Start Ollama locally to manage models.";
+    modelList.appendChild(message);
+    return;
+  }
+
+  if (!availableModels.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "No models available.";
+    modelList.appendChild(empty);
+    return;
+  }
+
+  const installed = availableModels.filter((model) => model.availableLocally);
+  const downloadable = availableModels.filter((model) => !model.availableLocally);
+
+  if (installed.length) {
+    const heading = document.createElement("h3");
+    heading.textContent = "Installed";
+    modelList.appendChild(heading);
+    installed.forEach((model) => {
+      modelList.appendChild(createModelCard(model, true));
+    });
+  }
+
+  if (downloadable.length) {
+    const heading = document.createElement("h3");
+    heading.textContent = "Available";
+    modelList.appendChild(heading);
+    downloadable.forEach((model) => {
+      modelList.appendChild(createModelCard(model, false));
+    });
+  }
+}
+
+function createModelCard(model, installed) {
   const card = document.createElement("div");
   card.className = "model-card";
+  card.setAttribute("data-model-id", model.id);
 
   const info = document.createElement("div");
   info.className = "model-info";
+
   const name = document.createElement("div");
   name.className = "model-name";
-  name.textContent = model.name;
+  name.textContent = model.label;
+
   const size = document.createElement("div");
   size.className = "model-size";
-  size.textContent = model.size ? formatSize(model.size) : (model.description || "");
-  info.appendChild(name);
-  info.appendChild(size);
+  size.textContent = model.formattedSize ?? model.description ?? "Size not available";
+
+  info.append(name, size);
 
   const actions = document.createElement("div");
   actions.className = "model-actions";
 
   if (installed) {
-    const badge = document.createElement("span");
-    badge.className = "model-badge";
-    badge.textContent = "Installed";
-    actions.appendChild(badge);
+    if (model.id === selectedModel) {
+      const badge = document.createElement("span");
+      badge.className = "model-badge";
+      badge.textContent = "Active";
+      actions.appendChild(badge);
+    } else {
+      const selectBtn = document.createElement("button");
+      selectBtn.type = "button";
+      selectBtn.className = "btn-secondary";
+      selectBtn.textContent = "Select";
+      selectBtn.addEventListener("click", () => selectModel(model.id));
+      actions.appendChild(selectBtn);
+    }
   } else {
-    const button = document.createElement("button");
-    button.className = "btn";
-    button.textContent = "Download";
-    button.onclick = () => downloadModel(model.name, button);
-    actions.appendChild(button);
+    const downloadBtn = document.createElement("button");
+    downloadBtn.type = "button";
+    downloadBtn.className = "btn";
+    downloadBtn.textContent = "Download";
+    downloadBtn.setAttribute("aria-label", `Download ${model.label}`);
+    downloadBtn.addEventListener("click", async () => {
+      downloadBtn.disabled = true;
+      downloadBtn.textContent = "Downloading...";
+      let errored = false;
+      const progressContainer = document.createElement("div");
+      progressContainer.className = "progress-container";
+      const progressBar = document.createElement("div");
+      progressBar.className = "progress-bar";
+      progressContainer.appendChild(progressBar);
+      actions.append(progressContainer);
+      try {
+        await downloadModel(model.id);
+        downloadBtn.textContent = "Downloaded";
+      } catch (error) {
+        console.error("Download failed", error);
+        errored = true;
+        downloadBtn.disabled = false;
+        downloadBtn.textContent = "Download";
+        progressContainer.remove();
+        window.alert("Download failed. Please try again.");
+      }
+      if (!errored) {
+        progressBar.style.width = "100%";
+      }
+    });
+    actions.appendChild(downloadBtn);
   }
 
-  card.appendChild(info);
-  card.appendChild(actions);
+  card.append(info, actions);
   return card;
 }
 
-async function downloadModel(name, button) {
-  button.disabled = true;
-  button.textContent = "Downloading...";
-
-  const container = document.createElement("div");
-  container.className = "progress-container";
-  const bar = document.createElement("div");
-  bar.className = "progress-bar";
-  container.appendChild(bar);
-  button.parentElement?.appendChild(container);
-
-  try {
-    const response = await fetch("/api/models/download", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: name })
-    });
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error("Unable to read download stream");
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      lines.forEach((line) => {
-        if (!line.trim()) return;
-        try {
-          const data = JSON.parse(line);
-          if (data.status === "downloading" && data.completed && data.total) {
-            bar.style.width = String((data.completed / data.total) * 100) + "%";
-          }
-          if (data.status === "success") {
-            button.textContent = "Downloaded";
-            container.remove();
-            loadModels();
-          }
-        } catch (error) {
-          /* ignore parse errors */
-        }
-      });
-    }
-  } catch (error) {
-    console.error("Download failed", error);
-    button.disabled = false;
-    button.textContent = "Download";
-    container.remove();
-    alert("Download failed. Please try again.");
+function handleKeyDown(event) {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    sendMessage();
   }
 }
 
-function formatSize(bytes) {
-  if (!bytes) return "Unknown";
-  const gb = bytes / 1073741824;
-  if (gb >= 1) return gb.toFixed(1) + " GB";
-  return (bytes / 1048576).toFixed(0) + " MB";
+function handlePromptClick(event) {
+  const button = event.target.closest(".prompt-btn");
+  if (!button) return;
+  const promptKey = button.dataset.prompt;
+  applyPromptTemplate(promptKey);
 }
 
-async function sendMessage() {
-  const conversation = getCurrentConversation();
-  if (!conversation) return;
-
-  if (conversation.archived) {
-    conversation.archived = false;
-    showArchived = false;
-    syncArchiveToggle();
-    updateHistoryLabel();
-  }
-
-  const rawMessage = userInput.value.trim();
-  if (!rawMessage) return;
-
-  let messageWithFiles = rawMessage;
-  if (uploadedFiles.length) {
-    messageWithFiles += "\n\nFiles:\n";
-    uploadedFiles.forEach((file) => {
-      messageWithFiles += file.name + ":\n\n```\n" + file.content + "\n```\n";
-    });
-  }
-
-  displayMessage("user", rawMessage);
-  chatHistory.push({ role: "user", content: messageWithFiles });
-  updateConversationMetadata(conversation, rawMessage);
-  saveConversations();
-  renderConversationList();
-
-  userInput.value = "";
-  uploadedFiles = [];
-  fileInput.value = "";
-  fileNames.innerHTML = "";
-  fileNames.style.display = "none";
-
-  typingIndicator.style.display = "block";
-
-  try {
-    const response = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: chatHistory })
-    });
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error("Unable to read response stream");
-    }
-
-    const decoder = new TextDecoder();
-    const placeholder = createMessageElement("assistant");
-    chatMessages.appendChild(placeholder);
-    let reply = "";
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      lines.forEach((line) => {
-        if (!line.trim()) return;
-        try {
-          const data = JSON.parse(line);
-          if (data.response) {
-            reply += data.response;
-            updateContent(placeholder, reply);
-          }
-        } catch (error) {
-          /* ignore partial JSON */
-        }
-      });
-    }
-
-    if (buffer.trim()) {
-      try {
-        const finalData = JSON.parse(buffer);
-        if (finalData.response) {
-          reply += finalData.response;
-          updateContent(placeholder, reply);
-        }
-      } catch (error) {
-        console.error("Failed to parse final buffer", error);
-      }
-    }
-
-    typingIndicator.style.display = "none";
-
-    if (reply.trim()) {
-      chatHistory.push({ role: "assistant", content: reply });
-      updateConversationMetadata(conversation);
-      saveConversations();
-      renderConversationList();
-      addCopyButtons();
-    }
-  } catch (error) {
-    typingIndicator.style.display = "none";
-    const errorMessage = "Error: " + error.message;
-    displayMessage("assistant", errorMessage);
-    chatHistory.push({ role: "assistant", content: errorMessage });
-    updateConversationMetadata(conversation);
-    saveConversations();
-    renderConversationList();
-  }
-}
-
-function updateConversationMetadata(conversation, userMessage) {
-  const sanitized = userMessage ? userMessage.replace(/\s+/g, " ").trim() : "";
-  if ((!conversation.title || conversation.title === DEFAULT_TITLE) && sanitized) {
-    conversation.title = truncateText(sanitized, 48);
-  }
-  conversation.archived = false;
-  conversation.updatedAt = Date.now();
-  updateArchiveControlsState();
-}
-
-function displayMessage(role, content) {
-  const element = createMessageElement(role);
-  updateContent(element, content);
-  chatMessages.appendChild(element);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-function createMessageElement(role) {
-  const element = document.createElement("div");
-  element.className = "message " + role + "-message";
-  return element;
-}
-
-function updateContent(element, content) {
-  element.innerHTML = window.marked ? window.marked.parse(content) : content;
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-  if (window.hljs) {
-    element.querySelectorAll("pre code").forEach((block) => {
-      window.hljs.highlightElement(block);
-    });
-  }
-}
-
-function addCopyButtons() {
-  document.querySelectorAll("pre code").forEach((block) => {
-    const parent = block.parentElement;
-    if (!parent) return;
-    if (parent.querySelector(".copy-btn")) return;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "copy-btn";
-    button.textContent = "Copy";
-    button.addEventListener("click", () => {
-      navigator.clipboard.writeText(block.textContent || "").then(() => {
-        button.textContent = "Copied";
-        setTimeout(() => {
-          button.textContent = "Copy";
-        }, 2000);
-      });
-    });
-    parent.appendChild(button);
-  });
-}
-
-function truncateText(text, maxLength) {
-  if (!text) return "";
-  return text.length > maxLength ? text.slice(0, maxLength - 3) + "..." : text;
-}
-
-function formatTimestamp(timestamp) {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "";
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-  const datePart = date.toDateString();
-  const timePart = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (datePart === today.toDateString()) {
-    return "Today " + timePart;
-  }
-  if (datePart === yesterday.toDateString()) {
-    return "Yesterday " + timePart;
-  }
-  return date.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + timePart;
-}
-
-function getDayKey(timestamp) {
-  const date = new Date(timestamp);
-  date.setHours(0, 0, 0, 0);
-  return date.toISOString();
-}
-
-function describeDay(timestamp) {
-  const date = new Date(timestamp);
-  const today = new Date();
-  const yesterday = new Date();
-  today.setHours(0, 0, 0, 0);
-  yesterday.setHours(0, 0, 0, 0);
-  yesterday.setDate(today.getDate() - 1);
-  const compare = new Date(timestamp);
-  compare.setHours(0, 0, 0, 0);
-  if (compare.getTime() === today.getTime()) return "Today";
-  if (compare.getTime() === yesterday.getTime()) return "Yesterday";
-  return date.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" });
-}
-
-function getVisibleConversations() {
-  return conversations.filter((conversation) => (showArchived ? conversation.archived : !conversation.archived));
-}
-
-function ensureVisibleConversation() {
-  const visible = getVisibleConversations();
-  if (visible.some((item) => item.id === currentConversationId)) {
-    return;
-  }
-  if (!visible.length) {
-    if (showArchived) {
-      showArchived = false;
-      syncArchiveToggle();
-      updateHistoryLabel();
-      ensureVisibleConversation();
-      return;
-    }
-    const nextConversation = conversations.find((item) => !item.archived);
-    if (nextConversation) {
-      setCurrentConversation(nextConversation.id);
-      return;
-    }
-    const fallback = createConversation();
-    conversations.push(fallback);
-    saveConversations();
-    setCurrentConversation(fallback.id);
-    return;
-  }
-  setCurrentConversation(visible[0].id);
-}
-
-function archiveConversation(conversationId) {
-  const conversation = conversations.find((item) => item.id === conversationId);
-  if (!conversation) return;
-  conversation.archived = true;
-  conversation.updatedAt = Date.now();
-  saveConversations();
-  updateArchiveControlsState();
-  ensureVisibleConversation();
+function handleToggleArchived() {
   renderConversationList();
 }
 
-function unarchiveConversation(conversationId) {
-  const conversation = conversations.find((item) => item.id === conversationId);
-  if (!conversation) return;
-  conversation.archived = false;
-  conversation.updatedAt = Date.now();
-  showArchived = false;
-  syncArchiveToggle();
-  updateHistoryLabel();
-  saveConversations();
-  updateArchiveControlsState();
-  setCurrentConversation(conversation.id);
+function handleNewChat() {
+  createFreshConversation();
 }
 
-function deleteConversation(conversationId) {
-  const conversation = conversations.find((item) => item.id === conversationId);
-  if (!conversation) return;
-  const confirmed = window.confirm("Delete this conversation? This cannot be undone.");
-  if (!confirmed) return;
-  conversations = conversations.filter((item) => item.id !== conversationId);
-  saveConversations();
-  updateArchiveControlsState();
-  if (conversationId === currentConversationId) {
-    ensureVisibleConversation();
-  } else {
-    renderConversationList();
-  }
+function handleCopyThread() {
+  copyActiveConversation();
 }
 
-function clearArchivedConversations() {
-  const archivedCount = conversations.filter((conversation) => conversation.archived).length;
-  if (!archivedCount) return;
-  const confirmed = window.confirm("Delete all archived conversations?");
-  if (!confirmed) return;
-  conversations = conversations.filter((conversation) => !conversation.archived);
-  saveConversations();
-  showArchived = false;
-  syncArchiveToggle();
-  updateArchiveControlsState();
-  ensureVisibleConversation();
-  renderConversationList();
+function handleExportMarkdown() {
+  exportConversationMarkdown();
 }
 
-function updateArchiveControlsState() {
-  const archivedCount = conversations.filter((conversation) => conversation.archived).length;
-  if (clearArchivedBtn) {
-    clearArchivedBtn.disabled = archivedCount === 0;
-    clearArchivedBtn.textContent = archivedCount ? "Clear archived (" + archivedCount + ")" : "Clear archived";
-  }
+function handleExportPdf() {
+  exportConversationPdf();
 }
 
-function syncArchiveToggle() {
-  if (toggleArchivedInput) {
-    toggleArchivedInput.checked = showArchived;
-  }
+function handleClearArchived() {
+  clearArchivedConversations();
 }
 
-function updateHistoryLabel() {
-  if (historyLabel) {
-    historyLabel.textContent = showArchived ? "Archived threads" : "Active threads";
-  }
+function handleSendButtonClick() {
+  sendMessage();
 }
 
-async function copyActiveConversation() {
-  const conversation = getCurrentConversation();
-  if (!conversation) return;
-  const text = buildConversationTranscript(conversation, false);
-  if (!navigator.clipboard) {
-    alert("Clipboard access is unavailable in this browser.");
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(text);
-    copyThreadBtn.textContent = "Copied";
-    setTimeout(() => {
-      copyThreadBtn.textContent = "Copy thread";
-    }, 2000);
-  } catch (error) {
-    console.error("Failed to copy conversation", error);
-    alert("Copy to clipboard failed. Please copy manually.");
-  }
+function handleModelSelectChange(event) {
+  const modelId = event.target.value;
+  selectModel(modelId);
 }
 
-function exportConversationMarkdown() {
-  const conversation = getCurrentConversation();
-  if (!conversation) return;
-  const markdown = buildConversationTranscript(conversation, true);
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  downloadText(markdown, "techaboo-conversation-" + timestamp + ".md", "text/markdown");
+function handleManageModelsClick() {
+  openModelModal();
 }
 
-function exportConversationPdf() {
-  const conversation = getCurrentConversation();
-  if (!conversation) return;
-  if (!window.jspdf || !window.jspdf.jsPDF) {
-    alert("PDF export requires jsPDF, which failed to load.");
-    return;
-  }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: "pt", format: "letter" });
-  const pageWidth = doc.internal.pageSize.getWidth() - 72;
-  const lines = buildConversationTranscript(conversation, false).split("\n");
-  let cursorY = 60;
-  doc.setFont("Helvetica", "normal");
-  doc.setFontSize(12);
-  lines.forEach((line) => {
-    const wrapped = doc.splitTextToSize(line, pageWidth);
-    wrapped.forEach((segment) => {
-      if (cursorY > doc.internal.pageSize.getHeight() - 60) {
-        doc.addPage();
-        cursorY = 60;
-      }
-      doc.text(segment, 36, cursorY);
-      cursorY += 18;
-    });
+function handleModalClose() {
+  closeModelModal();
+}
+
+function initPromptButtons() {
+  availablePrompts.forEach((button) => {
+    button.addEventListener("click", handlePromptClick);
   });
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  doc.save("techaboo-conversation-" + timestamp + ".pdf");
 }
 
-function buildConversationTranscript(conversation, asMarkdown) {
-  const lines = [];
-  conversation.messages.forEach((message) => {
-    const role = message.role === "assistant" ? "Assistant" : message.role === "system" ? "System" : "User";
-    const content = message.content.trim();
-    if (asMarkdown) {
-      lines.push("### " + role);
-      lines.push("");
-      lines.push(content);
-      lines.push("");
-    } else {
-      lines.push(role.toUpperCase() + ":");
-      lines.push(content);
-      lines.push("");
+function initConversationListHandlers() {
+  conversationList.addEventListener("click", handleConversationItemClick);
+  conversationList.addEventListener("keydown", handleConversationItemKeydown);
+}
+
+function initComposer() {
+  userInput.addEventListener("keydown", handleKeyDown);
+  userInput.addEventListener("input", persistDraft);
+  sendButton.addEventListener("click", handleSendButtonClick);
+}
+
+function initThreadControls() {
+  newChatBtn.addEventListener("click", handleNewChat);
+  copyThreadBtn.addEventListener("click", handleCopyThread);
+  exportMarkdownBtn.addEventListener("click", handleExportMarkdown);
+  exportPdfBtn.addEventListener("click", handleExportPdf);
+  toggleArchivedCheckbox.addEventListener("change", handleToggleArchived);
+  clearArchivedBtn.addEventListener("click", handleClearArchived);
+}
+
+function initModelManagement() {
+  modelSelect.addEventListener("change", handleModelSelectChange);
+  manageModelsBtn.addEventListener("click", handleManageModelsClick);
+  closeModalBtn.addEventListener("click", handleModalClose);
+  modelModal.addEventListener("click", (event) => {
+    if (event.target === modelModal) {
+      closeModelModal();
     }
   });
-  return lines.join("\n");
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeModelModal();
+    }
+  });
 }
 
-function downloadText(content, filename, mimeType) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
+function initFileUploads() {
+  fileInput.addEventListener("change", (event) => {
+    handleFileSelection(event).catch((error) => {
+      console.error("Failed to process files", error);
+    });
+  });
 }
+
+function restoreState() {
+  restoreDraft();
+  fetchModels();
+}
+
+function initialize() {
+  initPromptButtons();
+  initConversationListHandlers();
+  initComposer();
+  initThreadControls();
+  initModelManagement();
+  initFileUploads();
+  initializeConversations();
+  restoreState();
+}
+
+window.addEventListener("DOMContentLoaded", initialize);
