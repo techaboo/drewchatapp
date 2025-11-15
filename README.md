@@ -64,7 +64,30 @@ npm run dev
 
 This will start a local server at http://localhost:8787.
 
-Note: Using Workers AI accesses your Cloudflare account even during local development, which will incur usage charges.
+**Note:** Using Workers AI accesses your Cloudflare account even during local development, which will incur usage charges.
+
+#### Local Development with Ollama (Free Alternative)
+
+To avoid API charges during development, you can use Ollama locally:
+
+1. Install Ollama:
+   ```bash
+   winget install Ollama.Ollama
+   ```
+
+2. Pull a lightweight model:
+   ```bash
+   ollama pull llama3.2:1b
+   ```
+
+3. Ensure Ollama is running (it starts automatically on Windows, or run `ollama serve`)
+
+4. Start the dev server:
+   ```bash
+   npm run dev
+   ```
+
+The app will automatically detect Ollama running on `http://localhost:11434` and use the local model instead of Workers AI. When you deploy to production, it will use Workers AI.
 
 ### Deployment
 
