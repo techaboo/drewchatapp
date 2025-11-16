@@ -33,7 +33,7 @@ services:
     restart: unless-stopped
     networks:
       - drewchat-network
-    command: npm run dev
+    command: npm run dev -- --ip 0.0.0.0 --local
 
 networks:
   drewchat-network:
