@@ -69,19 +69,6 @@
         gap: 1rem;
       }
 
-      .user-info {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        font-size: 0.875rem;
-        color: var(--text-muted);
-      }
-
-      #logout-btn {
-        padding: 0.5rem 1rem;
-        font-size: 0.875rem;
-      }
-
       .logo {
         font-size: 1.5rem;
         font-weight: 600;
@@ -496,6 +483,32 @@
         font-size: 0.8rem;
       }
 
+      .web-search-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        user-select: none;
+        transition: color 0.2s;
+      }
+
+      .web-search-toggle:hover {
+        color: var(--text);
+      }
+
+      .web-search-toggle input[type="checkbox"] {
+        cursor: pointer;
+        width: 1rem;
+        height: 1rem;
+      }
+
+      .web-search-toggle input[type="checkbox"]:checked + span {
+        color: #0ea5e9;
+        font-weight: 600;
+      }
+
       footer {
         text-align: center;
         padding: 1rem;
@@ -667,10 +680,6 @@
         </div>
       </div>
       <div class="header-right">
-        <div class="user-info" id="userInfo" style="display: none;">
-          <span id="userEmail"></span>
-        </div>
-        <button id="logout-btn" class="btn-secondary" style="display: none;">Logout</button>
         <button id="manage-models-btn" class="btn">Manage Models</button>
       </div>
     </header>
@@ -738,6 +747,10 @@
           </div>
           <textarea id="user-input" placeholder="Ask Techaboo anything..." rows="6" aria-label="Message Techaboo"></textarea>
           <div class="composer-footer">
+            <label class="web-search-toggle" title="Enable real-time web search">
+              <input type="checkbox" id="web-search-toggle" />
+              <span>🌐 Web Search</span>
+            </label>
             <span class="hint">Shift + Enter for newline</span>
             <button id="send-button" class="btn">Send</button>
           </div>

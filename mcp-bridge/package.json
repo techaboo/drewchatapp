@@ -1,0 +1,16 @@
+{
+  "name": "mcp-bridge",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Bridge server to connect Cloudflare Workers to DuckDuckGo MCP server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "express": "^4.21.1",
+    "cors": "^2.8.5"
+  }
+}

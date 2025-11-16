@@ -2,34 +2,42 @@
  * For more details on how to configure Wrangler, refer to:
  * https://developers.cloudflare.com/workers/wrangler/configuration/
  */ {
-  "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "drewchatapp",
-  "main": "src/index.ts",
-  "compatibility_date": "2025-04-01",
-  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
-  "assets": {
-    "binding": "ASSETS",
-    "directory": "./public"
-  },
-  "observability": {
-    "enabled": false
-  },
-  "upload_source_maps": true,
-  "vars": {
-    "SMTP_HOST": "smtp.gmail.com",
-    "SMTP_PORT": "587",
-    "SMTP_USER": "andrewmichealshannon@gmail.com",
-    "SMTP_FROM": "onboarding@resend.dev",
-    "ADMIN_EMAIL": "techaboo@gmail.com"
-  },
-  "ai": {
-    "binding": "AI"
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "techaboo_chat",
-      "database_id": "techaboo_chat_db"
-    }
-  ]
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "drewchatapp",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-04-01",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": "./public"
+	},
+	"observability": {
+		"enabled": false
+	},
+	"upload_source_maps": true,
+	"vars": {
+		"SMTP_HOST": "smtp.gmail.com",
+		"SMTP_PORT": "587",
+		"SMTP_USER": "andrewmichealshannon@gmail.com",
+		"SMTP_FROM": "onboarding@resend.dev",
+		"ADMIN_EMAIL": "techaboo@gmail.com"
+	},
+	"ai": {
+		"binding": "AI"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "techaboo_chat",
+			"database_id": "078cde78-1beb-4d7a-a642-d42e8def88c9"
+		},
+		{
+			"binding": "techaboo_chat",
+			"database_name": "techaboo_chat",
+			"database_id": "078cde78-1beb-4d7a-a642-d42e8def88c9"
+		}
+	]
 }

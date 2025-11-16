@@ -1,81 +1,11 @@
 /* global marked, hljs, jspdf */
 
-// Session management
-function getSessionToken() {
-  const name = "session=";
-  const decodedCookie = decodeURIComponent(document.cookie);
-  const cookieArray = decodedCookie.split(";");
-  for (let cookie of cookieArray) {
-    cookie = cookie.trim();
-    if (cookie.indexOf(name) === 0) {
-      return cookie.substring(name.length);
-    }
-  }
-  return null;
-}
-
-function parseSessionToken(token) {
-  try {
-    return JSON.parse(atob(token));
-  } catch {
-    return null;
-  }
-}
-
-function isSessionValid() {
-  const token = getSessionToken();
-  if (!token) return false;
-  
-  const session = parseSessionToken(token);
-  if (!session || !session.userId || !session.expiresAt) return false;
-  
-  return session.expiresAt > Date.now();
-}
-
-async function checkAuth() {
-  // Only check auth on the main chat page, not on login/register pages
-  const isAuthPage = window.location.pathname === "/login.html" || 
-                     window.location.pathname === "/register.html";
-  
-  if (isAuthPage) {
-    return true; // Auth pages don't need session check
-  }
-  
-  if (!isSessionValid()) {
-    window.location.href = "/login.html";
-    return false;
-  }
-  
-  // Display user email if available
-  const token = getSessionToken();
-  const session = parseSessionToken(token);
-  if (session && session.email) {
-    const userInfo = document.getElementById("userInfo");
-    const userEmail = document.getElementById("userEmail");
-    const logoutBtn = document.getElementById("logout-btn");
-    if (userInfo && userEmail && logoutBtn) {
-      userInfo.style.display = "flex";
-      userEmail.textContent = session.email;
-      logoutBtn.style.display = "block";
-    }
-  }
-  
-  return true;
-}
-
-function logout() {
-  // Clear session cookie
-  document.cookie = "session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;";
-  window.location.href = "/login.html";
-}
+// Authentication disabled - direct access to chat
+// Session management functions kept for compatibility but not enforced
 
 document.addEventListener("DOMContentLoaded", () => {
-  checkAuth();
-  
-  const logoutBtn = document.getElementById("logout-btn");
-  if (logoutBtn) {
-    logoutBtn.addEventListener("click", logout);
-  }
+  // Auth check disabled - user can access chat directly
+  console.log("Authentication disabled - direct access enabled");
 });
 
 const STORAGE_KEY = "techaboo.chat.conversations";
@@ -668,12 +598,19 @@ async function sendMessage() {
   abortController = new AbortController();
   const { signal } = abortController;
 
+  // Check if web search is enabled
+  const webSearchToggle = document.getElementById("web-search-toggle");
+  const webSearchEnabled = webSearchToggle ? webSearchToggle.checked : false;
+  
+  console.log("💡 Web search toggle:", webSearchEnabled);
+
   const payload = {
     messages: conversation.messages.map((message) => ({
       role: message.role,
       content: message.content
     })),
-    model: selectedModel
+    model: selectedModel,
+    webSearch: webSearchEnabled
   };
 
   try {
@@ -1223,6 +1160,29 @@ function initFileUploads() {
 function restoreState() {
   restoreDraft();
   fetchModels();
+  checkWebSearchAvailability();
+}
+
+async function checkWebSearchAvailability() {
+  try {
+    const response = await fetch("/api/search/status");
+    if (!response.ok) return;
+    
+    const data = await response.json();
+    const webSearchToggle = document.getElementById("web-search-toggle");
+    const webSearchLabel = webSearchToggle?.parentElement;
+    
+    if (webSearchLabel) {
+      if (data.available) {
+        webSearchLabel.style.display = "flex";
+        webSearchLabel.title = `Real-time web search powered by ${data.provider}`;
+      } else {
+        webSearchLabel.style.display = "none";
+      }
+    }
+  } catch (error) {
+    console.error("Failed to check web search availability:", error);
+  }
 }
 
 function initialize() {

@@ -294,14 +294,6 @@ export default {
     if (url.pathname === "/api/chat") {
       // Handle POST requests for chat
       if (request.method === "POST") {
-        // Require authentication
-        const authResult = validateSession(request);
-        if (!authResult.valid) {
-          return new Response(
-            JSON.stringify({ message: "Unauthorized" }),
-            { status: 401, headers: { "Content-Type": "application/json" } }
-          );
-        }
         return handleChatRequest(request, env);
       }
       return new Response("Method not allowed", { status: 405 });
@@ -310,14 +302,6 @@ export default {
     // Model management routes
     if (url.pathname === "/api/models") {
       if (request.method === "GET") {
-        // Require authentication
-        const authResult = validateSession(request);
-        if (!authResult.valid) {
-          return new Response(
-            JSON.stringify({ message: "Unauthorized" }),
-            { status: 401, headers: { "Content-Type": "application/json" } }
-          );
-        }
         return handleListModels();
       }
       return new Response("Method not allowed", { status: 405 });
@@ -335,6 +319,35 @@ export default {
         return handleSelectModel(request);
       }
       return new Response("Method not allowed", { status: 405 });
+    }
+
+    // Web search status endpoint
+    if (url.pathname === "/api/search/status") {
+      try {
+        const healthCheck = await fetch('http://localhost:3001/health', {
+          signal: AbortSignal.timeout(2000) // 2 second timeout
+        });
+        const health = await healthCheck.json() as { status: string; mcp_connected: boolean };
+        
+        return new Response(
+          JSON.stringify({ 
+            available: health.status === 'ok' && health.mcp_connected,
+            provider: "duckduckgo-mcp",
+            bridge_running: health.status === 'ok',
+            mcp_connected: health.mcp_connected
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        );
+      } catch {
+        return new Response(
+          JSON.stringify({ 
+            available: false, 
+            provider: "duckduckgo-mcp",
+            error: "Bridge server not running. Start with: cd mcp-bridge && npm start"
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Auth routes
@@ -394,9 +407,12 @@ async function handleChatRequest(
 ): Promise<Response> {
   try {
     // Parse JSON request body
-    const { messages = [] } = (await request.json()) as {
+    const { messages = [], webSearch = false } = (await request.json()) as {
       messages: ChatMessage[];
+      webSearch?: boolean;
     };
+
+    console.log("💬 Chat request - Web search enabled:", webSearch);
 
     // Add system prompt if not present
     if (!messages.some((msg) => msg.role === "system")) {
@@ -405,6 +421,24 @@ async function handleChatRequest(
 
     // Check if Ollama is available for local development
     const useOllama = await isOllamaAvailable();
+
+    // Handle web search if enabled
+    if (webSearch) {
+      console.log("🌐 Web search enabled - performing search and adding context");
+      // Extract the last user message to search for
+      const lastUserMessage = messages.filter(m => m.role === "user").pop();
+      if (lastUserMessage) {
+        try {
+          const searchResults = await performWebSearch(lastUserMessage.content);
+          // Add search results as context to the conversation
+          const searchContext = `\n\n[Web Search Results]:\n${searchResults}\n\nBased on the above web search results, please provide an accurate and up-to-date answer.`;
+          lastUserMessage.content += searchContext;
+        } catch (error) {
+          console.error("Web search failed:", error);
+          // Continue without search results
+        }
+      }
+    }
 
     if (useOllama) {
       console.log("Using local Ollama model:", selectedModel ?? OLLAMA_MODEL);
@@ -498,9 +532,12 @@ async function handleChatRequest(
       },
     });
   } catch (error) {
-    console.error("Error processing chat request:", error);
+    console.error("❌ Error processing chat request:", error);
     return new Response(
-      JSON.stringify({ error: "Failed to process request" }),
+      JSON.stringify({ 
+        error: "Failed to process request",
+        details: error instanceof Error ? error.message : String(error)
+      }),
       {
         status: 500,
         headers: { "content-type": "application/json" },
@@ -619,6 +656,44 @@ async function handleOllamaRequest(
 }
 
 /**
+ * Performs web search using SearXNG public instance (no API key needed)
+ */
+async function performWebSearch(query: string): Promise<string> {
+  try {
+    console.log(`🔍 Calling MCP bridge for search: "${query}"`);
+    
+    // Call local MCP bridge server
+    const response = await fetch('http://localhost:3001/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        query,
+        max_results: 5
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Bridge server error: ${response.statusText}`);
+    }
+
+    const data = await response.json() as { query: string; results: string; timestamp: string };
+    
+    if (!data.results || data.results.trim() === '') {
+      return "No search results found.";
+    }
+
+    console.log(`✅ Web search completed via MCP bridge`);
+    return data.results;
+  } catch (error) {
+    console.error("❌ Web search error:", error);
+    // Return error but don't crash - AI can still try to answer
+    return "Web search temporarily unavailable. Make sure the MCP bridge server is running (npm start in mcp-bridge/).";
+  }
+}
+
+/**
  * List available and installed Ollama models, fallback to Workers AI
  */
 async function handleListModels(): Promise<Response> {
@@ -635,6 +710,13 @@ async function handleListModels(): Promise<Response> {
         { name: "phi3:mini", description: "Microsoft Phi-3 Mini (2.3 GB)", size: 2300000000 },
         { name: "gemma2:2b", description: "Google Gemma 2B (1.6 GB)", size: 1600000000 },
         { name: "qwen2.5:1.5b", description: "Qwen 2.5 1.5B (1 GB)", size: 1000000000 },
+        // Coding-optimized models (4GB and under)
+        { name: "qwen2.5-coder:0.5b", description: "🔧 Qwen Coder 0.5B - Ultra-fast coding (398 MB)", size: 398000000 },
+        { name: "qwen2.5-coder:1.5b", description: "🔧 Qwen Coder 1.5B - Best balance for coding (986 MB)", size: 986000000 },
+        { name: "deepseek-coder:1.3b", description: "🔧 DeepSeek Coder 1.3B - Code specialist (776 MB)", size: 776000000 },
+        { name: "codegemma:2b", description: "🔧 CodeGemma 2B - Google's code model (1.6 GB)", size: 1600000000 },
+        { name: "starcoder2:3b", description: "🔧 StarCoder2 3B - 600+ languages (1.7 GB)", size: 1700000000 },
+        { name: "qwen2.5-coder:3b", description: "🔧 Qwen Coder 3B - Advanced coding (1.9 GB)", size: 1900000000 },
       ];
 
       return new Response(
