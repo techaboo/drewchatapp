@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+.dev.vars
+*.md
+!README.md
+.wrangler
+dist
+templates
+mcp-bridge/node_modules

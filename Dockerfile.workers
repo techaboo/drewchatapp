@@ -1,0 +1,18 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy application code
+COPY . .
+
+# Expose Wrangler dev server port
+EXPOSE 8787
+
+# Start wrangler dev server
+CMD ["npm", "run", "dev", "--", "--ip", "0.0.0.0"]

@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # MCP Bridge Server - Connects Workers to DuckDuckGo MCP
+  mcp-bridge:
+    build:
+      context: ./mcp-bridge
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Required to spawn DuckDuckGo MCP container
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - drewchat-network
+
+  # Cloudflare Workers Dev Server
+  workers-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.workers
+    ports:
+      - "8787:8787"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    depends_on:
+      - mcp-bridge
+    restart: unless-stopped
+    networks:
+      - drewchat-network
+    command: npm run dev
+
+networks:
+  drewchat-network:
+    driver: bridge
