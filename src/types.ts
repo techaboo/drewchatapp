@@ -12,6 +12,26 @@ export interface Env {
    * Binding for static assets.
    */
   ASSETS: { fetch: (request: Request) => Promise<Response> };
+
+  /**
+   * Binding for Cloudflare D1 database.
+   */
+  DB: D1Database;
+
+  /**
+   * SMTP configuration for email notifications
+   */
+  SMTP_HOST: string;
+  SMTP_PORT: string;
+  SMTP_USER: string;
+  SMTP_PASSWORD: string;
+  SMTP_FROM: string;
+  ADMIN_EMAIL: string;
+  
+  /**
+   * Resend API key for email delivery
+   */
+  RESEND_API_KEY: string;
 }
 
 /**

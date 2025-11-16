@@ -1,5 +1,83 @@
 /* global marked, hljs, jspdf */
 
+// Session management
+function getSessionToken() {
+  const name = "session=";
+  const decodedCookie = decodeURIComponent(document.cookie);
+  const cookieArray = decodedCookie.split(";");
+  for (let cookie of cookieArray) {
+    cookie = cookie.trim();
+    if (cookie.indexOf(name) === 0) {
+      return cookie.substring(name.length);
+    }
+  }
+  return null;
+}
+
+function parseSessionToken(token) {
+  try {
+    return JSON.parse(atob(token));
+  } catch {
+    return null;
+  }
+}
+
+function isSessionValid() {
+  const token = getSessionToken();
+  if (!token) return false;
+  
+  const session = parseSessionToken(token);
+  if (!session || !session.userId || !session.expiresAt) return false;
+  
+  return session.expiresAt > Date.now();
+}
+
+async function checkAuth() {
+  // Only check auth on the main chat page, not on login/register pages
+  const isAuthPage = window.location.pathname === "/login.html" || 
+                     window.location.pathname === "/register.html";
+  
+  if (isAuthPage) {
+    return true; // Auth pages don't need session check
+  }
+  
+  if (!isSessionValid()) {
+    window.location.href = "/login.html";
+    return false;
+  }
+  
+  // Display user email if available
+  const token = getSessionToken();
+  const session = parseSessionToken(token);
+  if (session && session.email) {
+    const userInfo = document.getElementById("userInfo");
+    const userEmail = document.getElementById("userEmail");
+    const logoutBtn = document.getElementById("logout-btn");
+    if (userInfo && userEmail && logoutBtn) {
+      userInfo.style.display = "flex";
+      userEmail.textContent = session.email;
+      logoutBtn.style.display = "block";
+    }
+  }
+  
+  return true;
+}
+
+function logout() {
+  // Clear session cookie
+  document.cookie = "session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;";
+  window.location.href = "/login.html";
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  checkAuth();
+  
+  const logoutBtn = document.getElementById("logout-btn");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", logout);
+  }
+});
+
 const STORAGE_KEY = "techaboo.chat.conversations";
 const DRAFT_KEY = "techaboo.chat.draft";
 const SYSTEM_PROMPTS = {
@@ -703,18 +781,12 @@ async function fetchModels() {
     const data = await response.json();
     ollamaAvailable = Boolean(data.available);
 
-    if (!ollamaAvailable) {
-      availableModels = [];
-      selectedModel = null;
-      renderModelOptions();
-      renderModelList();
-      return;
-    }
-
+    // Build available models list
     const installed = Array.isArray(data.installedModels) ? data.installedModels : [];
     const downloadable = Array.isArray(data.availableModels) ? data.availableModels : [];
     const inventory = new Map();
 
+    // Add installed models (Ollama only)
     installed.forEach((model) => {
       const formattedSize = formatModelSize(model.size);
       inventory.set(model.name, {
@@ -727,6 +799,7 @@ async function fetchModels() {
       });
     });
 
+    // Add downloadable/available models (Ollama or Workers AI)
     downloadable.forEach((model) => {
       const existing = inventory.get(model.name) ?? {
         id: model.name,
@@ -747,8 +820,7 @@ async function fetchModels() {
     });
 
     availableModels = Array.from(inventory.values()).sort((a, b) => a.label.localeCompare(b.label));
-
-    const active = typeof data.currentModel === "string" ? data.currentModel : installed[0]?.name ?? null;
+    const active = typeof data.currentModel === "string" ? data.currentModel : installed[0]?.name ?? downloadable[0]?.name ?? null;
     selectedModel = active;
 
     renderModelOptions();
@@ -766,35 +838,57 @@ async function fetchModels() {
 function renderModelOptions() {
   modelSelect.innerHTML = "";
 
-  if (!ollamaAvailable) {
+  // If Ollama is available, show only installed local models
+  if (ollamaAvailable) {
+    const installed = availableModels.filter((model) => model.availableLocally);
+    if (!installed.length) {
+      const option = document.createElement("option");
+      option.textContent = "No local models";
+      modelSelect.appendChild(option);
+      modelSelect.disabled = true;
+      return;
+    }
+
+    installed.forEach((model) => {
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = model.formattedSize ? `${model.label} (${model.formattedSize})` : model.label;
+      if (model.id === selectedModel) {
+        option.selected = true;
+      }
+      modelSelect.appendChild(option);
+    });
+
+    if (!installed.some((model) => model.id === selectedModel)) {
+      selectedModel = installed[0]?.id ?? null;
+    }
+
+    modelSelect.disabled = false;
+    return;
+  }
+
+  // Ollama offline: show Workers AI models
+  const workersAiModels = availableModels.filter((model) => !model.availableLocally);
+  if (!workersAiModels.length) {
     const option = document.createElement("option");
-    option.textContent = "Ollama offline";
+    option.textContent = "No models available";
     modelSelect.appendChild(option);
     modelSelect.disabled = true;
     return;
   }
 
-  const installed = availableModels.filter((model) => model.availableLocally);
-  if (!installed.length) {
-    const option = document.createElement("option");
-    option.textContent = "No local models";
-    modelSelect.appendChild(option);
-    modelSelect.disabled = true;
-    return;
-  }
-
-  installed.forEach((model) => {
+  workersAiModels.forEach((model) => {
     const option = document.createElement("option");
     option.value = model.id;
-    option.textContent = model.formattedSize ? `${model.label} (${model.formattedSize})` : model.label;
+    option.textContent = model.label || model.id;
     if (model.id === selectedModel) {
       option.selected = true;
     }
     modelSelect.appendChild(option);
   });
 
-  if (!installed.some((model) => model.id === selectedModel)) {
-    selectedModel = installed[0]?.id ?? null;
+  if (!workersAiModels.some((model) => model.id === selectedModel)) {
+    selectedModel = workersAiModels[0]?.id ?? null;
   }
 
   modelSelect.disabled = false;
@@ -883,17 +977,29 @@ function updateModelProgress(modelId, progress) {
 function renderModelList() {
   modelList.innerHTML = "";
 
-  if (!ollamaAvailable) {
-    const message = document.createElement("p");
-    message.textContent = "Ollama is offline. Start Ollama locally to manage models.";
-    modelList.appendChild(message);
-    return;
-  }
-
   if (!availableModels.length) {
     const empty = document.createElement("p");
     empty.textContent = "No models available.";
     modelList.appendChild(empty);
+    return;
+  }
+
+  if (!ollamaAvailable) {
+    // Show Workers AI models when Ollama is offline
+    const workersAiModels = availableModels.filter((model) => !model.availableLocally);
+    if (!workersAiModels.length) {
+      const message = document.createElement("p");
+      message.textContent = "Ollama is offline. Start Ollama locally to manage models.";
+      modelList.appendChild(message);
+      return;
+    }
+
+    const heading = document.createElement("h3");
+    heading.textContent = "Available (Cloud)";
+    modelList.appendChild(heading);
+    workersAiModels.forEach((model) => {
+      modelList.appendChild(createModelCard(model, false, true));
+    });
     return;
   }
 
@@ -919,7 +1025,7 @@ function renderModelList() {
   }
 }
 
-function createModelCard(model, installed) {
+function createModelCard(model, installed, isWorkersAi = false) {
   const card = document.createElement("div");
   card.className = "model-card";
   card.setAttribute("data-model-id", model.id);
@@ -940,7 +1046,23 @@ function createModelCard(model, installed) {
   const actions = document.createElement("div");
   actions.className = "model-actions";
 
-  if (installed) {
+  // Workers AI models (cloud): show select button only
+  if (isWorkersAi) {
+    if (model.id === selectedModel) {
+      const badge = document.createElement("span");
+      badge.className = "model-badge";
+      badge.textContent = "Active";
+      actions.appendChild(badge);
+    } else {
+      const selectBtn = document.createElement("button");
+      selectBtn.type = "button";
+      selectBtn.className = "btn-secondary";
+      selectBtn.textContent = "Select";
+      selectBtn.addEventListener("click", () => selectModel(model.id));
+      actions.appendChild(selectBtn);
+    }
+  } else if (installed) {
+    // Ollama: installed models
     if (model.id === selectedModel) {
       const badge = document.createElement("span");
       badge.className = "model-badge";
@@ -955,6 +1077,7 @@ function createModelCard(model, installed) {
       actions.appendChild(selectBtn);
     }
   } else {
+    // Ollama: available for download
     const downloadBtn = document.createElement("button");
     downloadBtn.type = "button";
     downloadBtn.className = "btn";

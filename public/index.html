@@ -6,7 +6,10 @@
     <title>Techaboo AI Chat</title>
     <link
       rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+      integrity="sha512-rO+olRTkcf304DQBxSWxln8JXCzTHlKnIdnMUwYvQa9/Jd4cQaNkItIUj6Z4nvW1dqK0SKXLbn9h4KwZTNtAyw=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
     />
     <style>
       :root {
@@ -50,12 +53,33 @@
         justify-content: space-between;
         align-items: center;
         box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        flex-wrap: wrap;
+        gap: 1rem;
       }
 
       .header-left {
         display: flex;
         align-items: center;
         gap: 1rem;
+      }
+
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+      }
+
+      .user-info {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-size: 0.875rem;
+        color: var(--text-muted);
+      }
+
+      #logout-btn {
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
       }
 
       .logo {
@@ -642,7 +666,13 @@
           <select id="model-select" aria-label="Select AI model" title="Select AI model"></select>
         </div>
       </div>
-      <button id="manage-models-btn" class="btn">Manage Models</button>
+      <div class="header-right">
+        <div class="user-info" id="userInfo" style="display: none;">
+          <span id="userEmail"></span>
+        </div>
+        <button id="logout-btn" class="btn-secondary" style="display: none;">Logout</button>
+        <button id="manage-models-btn" class="btn">Manage Models</button>
+      </div>
     </header>
 
     <main>
@@ -727,13 +757,32 @@
       </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script>
-      window.addEventListener("load", () => {
+      // Initialize libraries when DOM is ready
+      document.addEventListener('DOMContentLoaded', function() {
+        // Configure highlight.js if available
         if (window.hljs) {
           window.hljs.configure({ cssSelector: "pre code" });
+          window.hljs.highlightAll();
+        }
+        
+        // Initialize marked if available
+        if (window.marked) {
+          window.marked.setOptions({
+            highlight: function(code, lang) {
+              if (window.hljs && lang && window.hljs.getLanguage(lang)) {
+                try {
+                  return window.hljs.highlight(code, { language: lang }).value;
+                } catch (err) {
+                  console.warn('Highlight.js error:', err);
+                }
+              }
+              return code;
+            }
+          });
         }
       });
     </script>
