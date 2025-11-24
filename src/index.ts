@@ -275,100 +275,96 @@ async function isOllamaAvailable(): Promise<boolean> {
 }
 
 export default {
-  /**
-   * Main request handler for the Worker
-   */
-  async fetch(
-    request: Request,
-    env: Env,
-    ctx: ExecutionContext,
-  ): Promise<Response> {
-    const url = new URL(request.url);
+/**
+ * Handles requests to Workers AI
+ */
+async function handleWorkersAiRequest(
+  messages: ChatMessage[],
+  model: string,
+  env: Env
+): Promise<Response> {
+  // Use Workers AI with streaming
+  const aiResponse = await env.AI.run(model as any, {
+    messages,
+    max_tokens: 1024,
+    stream: true,
+  });
 
-    // Handle static assets (frontend)
-    if (url.pathname === "/" || !url.pathname.startsWith("/api/")) {
-      return env.ASSETS.fetch(request);
-    }
+  // Workers AI returns a ReadableStream, transform it to our format
+  const stream = aiResponse as ReadableStream<Uint8Array>;
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
 
-    // API Routes
-    if (url.pathname === "/api/chat") {
-      // Handle POST requests for chat
-      if (request.method === "POST") {
-        return handleChatRequest(request, env);
+  (async () => {
+    try {
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith("data: ")) continue;
+
+          try {
+            const jsonStr = line.slice(6); // Remove "data: " prefix
+            const data = JSON.parse(jsonStr);
+            
+            // Extract response text from Workers AI format
+            if (data.response) {
+              fullText += data.response;
+              const output = JSON.stringify({
+                text: fullText,
+                response: fullText,
+              });
+              await writer.write(encoder.encode(output + "\n"));
+            }
+          } catch (e) {
+            console.error("Error parsing Workers AI response:", line.substring(0, 100), e);
+          }
+        }
       }
-      return new Response("Method not allowed", { status: 405 });
-    }
 
-    // Model management routes
-    if (url.pathname === "/api/models") {
-      if (request.method === "GET") {
-        return handleListModels();
+      // Process final buffer
+      if (buffer.trim() && buffer.startsWith("data: ")) {
+        try {
+          const jsonStr = buffer.slice(6);
+          const data = JSON.parse(jsonStr);
+          if (data.response) {
+            fullText += data.response;
+            const output = JSON.stringify({
+              text: fullText,
+              response: fullText,
+            });
+            await writer.write(encoder.encode(output + "\n"));
+          }
+        } catch (e) {
+          console.error("Error parsing final Workers AI buffer:", e);
+        }
       }
-      return new Response("Method not allowed", { status: 405 });
+    } catch (error) {
+      console.error("Error streaming from Workers AI:", error);
+    } finally {
+      await writer.close();
     }
+  })();
 
-    if (url.pathname === "/api/models/download") {
-      if (request.method === "POST") {
-        return handleDownloadModel(request);
-      }
-      return new Response("Method not allowed", { status: 405 });
-    }
-
-    if (url.pathname === "/api/models/select") {
-      if (request.method === "POST") {
-        return handleSelectModel(request);
-      }
-      return new Response("Method not allowed", { status: 405 });
-    }
-
-    // Web search status endpoint
-    if (url.pathname === "/api/search/status") {
-      try {
-        const healthCheck = await fetch('http://localhost:3001/health', {
-          signal: AbortSignal.timeout(2000) // 2 second timeout
-        });
-        const health = await healthCheck.json() as { status: string; mcp_connected: boolean };
-        
-        return new Response(
-          JSON.stringify({ 
-            available: health.status === 'ok' && health.mcp_connected,
-            provider: "duckduckgo-mcp",
-            bridge_running: health.status === 'ok',
-            mcp_connected: health.mcp_connected
-          }),
-          { headers: { "Content-Type": "application/json" } }
-        );
-      } catch {
-        return new Response(
-          JSON.stringify({ 
-            available: false, 
-            provider: "duckduckgo-mcp",
-            error: "Bridge server not running. Start with: cd mcp-bridge && npm start"
-          }),
-          { headers: { "Content-Type": "application/json" } }
-        );
-      }
-    }
-
-    // Auth routes
-    if (url.pathname === "/api/auth/register") {
-      if (request.method === "POST") {
-        return handleRegister(request, env);
-      }
-      return new Response("Method not allowed", { status: 405 });
-    }
-
-    if (url.pathname === "/api/auth/login") {
-      if (request.method === "POST") {
-        return handleLogin(request, env);
-      }
-      return new Response("Method not allowed", { status: 405 });
-    }
-
-    if (url.pathname === "/api/auth/verify") {
-      if (request.method === "GET") {
-        return handleVerifySession(request);
-      }
+  return new Response(readable, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+}
       return new Response("Method not allowed", { status: 405 });
     }
 
@@ -478,13 +474,12 @@ async function handleWorkersAiRequest(
   model: string,
   env: Env
 ): Promise<Response> {
-  try {
-    // Use Workers AI with streaming
-    const aiResponse = await env.AI.run(model as any, {
-      messages,
-      max_tokens: 1024,
-      stream: true,
-    });
+  // Use Workers AI with streaming
+  const aiResponse = await env.AI.run(model as any, {
+    messages,
+    max_tokens: 1024,
+    stream: true,
+  });
 
     // Workers AI returns a ReadableStream, transform it to our format
     const stream = aiResponse as ReadableStream<Uint8Array>;
