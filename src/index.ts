@@ -476,7 +476,7 @@ async function handleChatRequest(
 async function handleWorkersAiRequest(
   messages: ChatMessage[],
   model: string,
-  env: Env,
+  env: Env
 ): Promise<Response> {
   try {
     // Use Workers AI with streaming
@@ -486,7 +486,7 @@ async function handleWorkersAiRequest(
         messages,
         max_tokens: 1024,
         stream: true,
-      },
+      }
     );
 
     // Workers AI returns a ReadableStream, transform it to our format
