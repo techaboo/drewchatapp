@@ -18,6 +18,7 @@ services:
 
   # Cloudflare Workers Dev Server
   workers-dev:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.workers
@@ -28,12 +29,13 @@ services:
       - /app/node_modules
     environment:
       - NODE_ENV=development
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-}
     depends_on:
       - mcp-bridge
     restart: unless-stopped
     networks:
       - drewchat-network
-    command: npm run dev
+    command: npm run dev -- --local --ip 0.0.0.0
 
 networks:
   drewchat-network:

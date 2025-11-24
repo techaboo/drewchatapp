@@ -775,38 +775,43 @@ async function fetchModels() {
 function renderModelOptions() {
   modelSelect.innerHTML = "";
 
-  // If Ollama is available, show only installed local models
-  if (ollamaAvailable) {
-    const installed = availableModels.filter((model) => model.availableLocally);
-    if (!installed.length) {
-      const option = document.createElement("option");
-      option.textContent = "No local models";
-      modelSelect.appendChild(option);
-      modelSelect.disabled = true;
-      return;
-    }
+  const localModels = availableModels.filter((model) => model.availableLocally);
+  const cloudModels = availableModels.filter((model) => model.id.startsWith("@cf/"));
 
-    installed.forEach((model) => {
+  // Add local models section
+  if (localModels.length > 0) {
+    const localGroup = document.createElement("optgroup");
+    localGroup.label = "🖥️ Local Models (Ollama)";
+    localModels.forEach((model) => {
       const option = document.createElement("option");
       option.value = model.id;
       option.textContent = model.formattedSize ? `${model.label} (${model.formattedSize})` : model.label;
       if (model.id === selectedModel) {
         option.selected = true;
       }
-      modelSelect.appendChild(option);
+      localGroup.appendChild(option);
     });
-
-    if (!installed.some((model) => model.id === selectedModel)) {
-      selectedModel = installed[0]?.id ?? null;
-    }
-
-    modelSelect.disabled = false;
-    return;
+    modelSelect.appendChild(localGroup);
   }
 
-  // Ollama offline: show Workers AI models
-  const workersAiModels = availableModels.filter((model) => !model.availableLocally);
-  if (!workersAiModels.length) {
+  // Add cloud models section
+  if (cloudModels.length > 0) {
+    const cloudGroup = document.createElement("optgroup");
+    cloudGroup.label = "☁️ Cloud Models (Workers AI)";
+    cloudModels.forEach((model) => {
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = model.description || model.label || model.id;
+      if (model.id === selectedModel) {
+        option.selected = true;
+      }
+      cloudGroup.appendChild(option);
+    });
+    modelSelect.appendChild(cloudGroup);
+  }
+
+  // Fallback if no models available
+  if (localModels.length === 0 && cloudModels.length === 0) {
     const option = document.createElement("option");
     option.textContent = "No models available";
     modelSelect.appendChild(option);
@@ -814,18 +819,13 @@ function renderModelOptions() {
     return;
   }
 
-  workersAiModels.forEach((model) => {
-    const option = document.createElement("option");
-    option.value = model.id;
-    option.textContent = model.label || model.id;
-    if (model.id === selectedModel) {
-      option.selected = true;
+  // Auto-select first available model if current selection is invalid
+  const allModels = [...localModels, ...cloudModels];
+  if (!allModels.some((model) => model.id === selectedModel)) {
+    selectedModel = allModels[0]?.id ?? null;
+    if (selectedModel) {
+      modelSelect.value = selectedModel;
     }
-    modelSelect.appendChild(option);
-  });
-
-  if (!workersAiModels.some((model) => model.id === selectedModel)) {
-    selectedModel = workersAiModels[0]?.id ?? null;
   }
 
   modelSelect.disabled = false;
