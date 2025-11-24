@@ -480,14 +480,11 @@ async function handleWorkersAiRequest(
 ): Promise<Response> {
   try {
     // Use Workers AI with streaming
-    const aiResponse = await env.AI.run(
-      model as any,
-      {
-        messages,
-        max_tokens: 1024,
-        stream: true,
-      }
-    );
+    const aiResponse = await env.AI.run(model as any, {
+      messages,
+      max_tokens: 1024,
+      stream: true,
+    });
 
     // Workers AI returns a ReadableStream, transform it to our format
     const stream = aiResponse as ReadableStream<Uint8Array>;
