@@ -614,6 +614,12 @@ async function sendMessage() {
   };
 
   try {
+    console.log("📤 Sending chat request:", {
+      model: selectedModel,
+      messageCount: payload.messages.length,
+      webSearch: webSearchEnabled
+    });
+
     streamReader = await fetch(`/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -621,17 +627,33 @@ async function sendMessage() {
       signal
     });
 
-    if (!streamReader.ok || !streamReader.body) {
-      throw new Error(`Request failed: ${streamReader.status}`);
+    console.log("📥 Response status:", streamReader.status, streamReader.statusText);
+
+    if (!streamReader.ok) {
+      const errorText = await streamReader.text();
+      console.error("❌ Server error:", errorText);
+      throw new Error(`Request failed: ${streamReader.status} - ${errorText}`);
+    }
+    
+    if (!streamReader.body) {
+      console.error("❌ No response body");
+      throw new Error("No response body received");
     }
 
     const reader = streamReader.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let chunkCount = 0;
+
+    console.log("📖 Starting to read stream...");
 
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) {
+        console.log("✅ Stream reading complete. Total chunks:", chunkCount);
+        break;
+      }
+      
       buffer += decoder.decode(value, { stream: true });
 
       let newlineIndex;
@@ -640,16 +662,28 @@ async function sendMessage() {
         buffer = buffer.slice(newlineIndex + 1);
         if (!chunk) continue;
 
-        const data = JSON.parse(chunk);
-        if (data.event === "completion" || data.response || data.text) {
-          const text = data.text ?? data.response ?? "";
-          updateLastAssistantMessage(text);
-          const assistantMessage = getActiveConversation()?.messages.at(-1);
-          if (assistantMessage) {
-            assistantMessage.content = text;
-            assistantMessage.streaming = true;
-            saveConversations();
+        chunkCount++;
+        console.log(`📦 Chunk ${chunkCount}:`, chunk.substring(0, 100));
+
+        try {
+          const data = JSON.parse(chunk);
+          console.log("🔍 Parsed data keys:", Object.keys(data));
+          
+          if (data.event === "completion" || data.response || data.text) {
+            const text = data.text ?? data.response ?? "";
+            console.log("📝 Updating message with text length:", text.length);
+            updateLastAssistantMessage(text);
+            const assistantMessage = getActiveConversation()?.messages.at(-1);
+            if (assistantMessage) {
+              assistantMessage.content = text;
+              assistantMessage.streaming = true;
+              saveConversations();
+            }
+          } else {
+            console.warn("⚠️ Chunk has no recognized text field:", data);
           }
+        } catch (parseError) {
+          console.error("❌ Error parsing chunk:", parseError, "Chunk:", chunk.substring(0, 100));
         }
       }
     }
