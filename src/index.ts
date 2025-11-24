@@ -473,24 +473,20 @@ async function handleWorkersAiRequest(
     
     // Check if this is a Responses API model (like GPT-OSS-120B)
     // These models use 'input' parameter instead of 'messages'
+    // GPT-OSS models can accept input as either:
+    //   1. A simple string (single prompt)
+    //   2. An array of message-like objects (for multi-turn conversations)
     // All other Workers AI models (Llama, Qwen, Mistral, etc.) use standard 'messages' format
     const isResponsesApiModel = model.includes('gpt-oss');
     console.log("📋 Using Responses API:", isResponsesApiModel);
     
     let aiResponse;
     if (isResponsesApiModel) {
-      // For Responses API models, convert messages to input format
-      // Concatenate all messages into a single input string
-      const input = messages.map(msg => {
-        if (msg.role === 'system') return `System: ${msg.content}`;
-        if (msg.role === 'user') return `User: ${msg.content}`;
-        if (msg.role === 'assistant') return `Assistant: ${msg.content}`;
-        return msg.content;
-      }).join('\n\n');
-      
-      console.log("📤 Sending to AI (input format):", input.substring(0, 100) + "...");
+      // For Responses API models, send messages array as 'input'
+      // The Responses API accepts an array of message objects directly
+      console.log("📤 Sending to AI (Responses API with array input)");
       aiResponse = await env.AI.run(model as any, {
-        input,
+        input: messages,
         stream: true,
       });
     } else {
@@ -799,6 +795,7 @@ async function handleListModels(): Promise<Response> {
 
   // Fallback to Workers AI models when Ollama is unavailable
   const workersAiModels = [
+    // --- General Purpose Models ---
     {
       name: "@cf/openai/gpt-oss-120b",
       description: "☁️ GPT-OSS 120B - OpenAI's powerful reasoning model",
@@ -827,6 +824,18 @@ async function handleListModels(): Promise<Response> {
     {
       name: "@cf/mistral/mistral-7b-instruct-v0.1",
       description: "☁️ Mistral 7B - Excellent reasoning",
+      size: null,
+    },
+    
+    // --- Code-Specialized Models ---
+    {
+      name: "@cf/qwen/qwen2.5-coder-32b-instruct",
+      description: "🔧 Qwen 2.5 Coder 32B - Advanced code generation",
+      size: null,
+    },
+    {
+      name: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+      description: "🔧 DeepSeek R1 32B - Reasoning-focused coding",
       size: null,
     },
   ];
