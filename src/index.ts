@@ -456,12 +456,34 @@ async function handleWorkersAiRequest(
   env: Env
 ): Promise<Response> {
   try {
-    // Use Workers AI with streaming
-    const aiResponse = await env.AI.run(model as any, {
-      messages,
-      max_tokens: 1024,
-      stream: true,
-    });
+    // Check if this is a Responses API model (like GPT-OSS-120B)
+    // These models use 'input' parameter instead of 'messages'
+    // All other Workers AI models (Llama, Qwen, Mistral, etc.) use standard 'messages' format
+    const isResponsesApiModel = model.includes('gpt-oss');
+    
+    let aiResponse;
+    if (isResponsesApiModel) {
+      // For Responses API models, convert messages to input format
+      // Concatenate all messages into a single input string
+      const input = messages.map(msg => {
+        if (msg.role === 'system') return `System: ${msg.content}`;
+        if (msg.role === 'user') return `User: ${msg.content}`;
+        if (msg.role === 'assistant') return `Assistant: ${msg.content}`;
+        return msg.content;
+      }).join('\n\n');
+      
+      aiResponse = await env.AI.run(model as any, {
+        input,
+        stream: true,
+      });
+    } else {
+      // Standard chat models use messages format
+      aiResponse = await env.AI.run(model as any, {
+        messages,
+        max_tokens: 1024,
+        stream: true,
+      });
+    }
 
     // Workers AI returns a ReadableStream, transform it to our format
     const stream = aiResponse as ReadableStream<Uint8Array>;
