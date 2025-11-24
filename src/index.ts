@@ -275,96 +275,76 @@ async function isOllamaAvailable(): Promise<boolean> {
 }
 
 export default {
-/**
- * Handles requests to Workers AI
- */
-async function handleWorkersAiRequest(
-  messages: ChatMessage[],
-  model: string,
-  env: Env
-): Promise<Response> {
-  // Use Workers AI with streaming
-  const aiResponse = await env.AI.run(model as any, {
-    messages,
-    max_tokens: 1024,
-    stream: true,
-  });
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
 
-  // Workers AI returns a ReadableStream, transform it to our format
-  const stream = aiResponse as ReadableStream<Uint8Array>;
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
-  const encoder = new TextEncoder();
-
-  (async () => {
-    try {
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let fullText = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim() || !line.startsWith("data: ")) continue;
-
-          try {
-            const jsonStr = line.slice(6); // Remove "data: " prefix
-            const data = JSON.parse(jsonStr);
-            
-            // Extract response text from Workers AI format
-            if (data.response) {
-              fullText += data.response;
-              const output = JSON.stringify({
-                text: fullText,
-                response: fullText,
-              });
-              await writer.write(encoder.encode(output + "\n"));
-            }
-          } catch (e) {
-            console.error("Error parsing Workers AI response:", line.substring(0, 100), e);
-          }
-        }
-      }
-
-      // Process final buffer
-      if (buffer.trim() && buffer.startsWith("data: ")) {
-        try {
-          const jsonStr = buffer.slice(6);
-          const data = JSON.parse(jsonStr);
-          if (data.response) {
-            fullText += data.response;
-            const output = JSON.stringify({
-              text: fullText,
-              response: fullText,
-            });
-            await writer.write(encoder.encode(output + "\n"));
-          }
-        } catch (e) {
-          console.error("Error parsing final Workers AI buffer:", e);
-        }
-      }
-    } catch (error) {
-      console.error("Error streaming from Workers AI:", error);
-    } finally {
-      await writer.close();
+    // Serve static files
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      return new Response(await env.ASSETS.fetch(request).then((r) => r.text()), {
+        headers: { "Content-Type": "text/html" },
+      });
     }
-  })();
 
-  return new Response(readable, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  });
-}
+    if (url.pathname.startsWith("/") && !url.pathname.startsWith("/api")) {
+      return env.ASSETS.fetch(request);
+    }
+
+    // API routes
+    if (url.pathname === "/api/chat") {
+      // Validate session
+      const sessionCheck = validateSession(request);
+      if (!sessionCheck.valid) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (request.method === "POST") {
+        return handleChatRequest(request, env);
+      }
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    if (url.pathname === "/api/models") {
+      if (request.method === "GET") {
+        return handleListModels();
+      }
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    if (url.pathname === "/api/models/download") {
+      if (request.method === "POST") {
+        return handleDownloadModel(request);
+      }
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    if (url.pathname === "/api/models/select") {
+      if (request.method === "POST") {
+        return handleSelectModel(request);
+      }
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    if (url.pathname === "/api/auth/register") {
+      if (request.method === "POST") {
+        return handleRegister(request, env);
+      }
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    if (url.pathname === "/api/auth/login") {
+      if (request.method === "POST") {
+        return handleLogin(request, env);
+      }
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    if (url.pathname === "/api/auth/verify") {
+      if (request.method === "GET") {
+        return handleVerifySession(request);
+      }
       return new Response("Method not allowed", { status: 405 });
     }
 
@@ -474,12 +454,13 @@ async function handleWorkersAiRequest(
   model: string,
   env: Env
 ): Promise<Response> {
-  // Use Workers AI with streaming
-  const aiResponse = await env.AI.run(model as any, {
-    messages,
-    max_tokens: 1024,
-    stream: true,
-  });
+  try {
+    // Use Workers AI with streaming
+    const aiResponse = await env.AI.run(model as any, {
+      messages,
+      max_tokens: 1024,
+      stream: true,
+    });
 
     // Workers AI returns a ReadableStream, transform it to our format
     const stream = aiResponse as ReadableStream<Uint8Array>;
@@ -554,7 +535,7 @@ async function handleWorkersAiRequest(
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
       },
-    );
+    });
   } catch (error) {
     console.error("❌ Error with Workers AI:", error);
     throw error;
