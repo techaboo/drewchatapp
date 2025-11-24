@@ -36,6 +36,31 @@ A production-ready, feature-rich AI chat application powered by Cloudflare Worke
 
 ---
 
+## ⚡ Quick Start (Windows)
+
+### Deploy to Production
+```cmd
+deploy-production.bat
+```
+Commits changes, pushes to Git, and deploys to Cloudflare Workers.
+
+### Start Local Development
+```cmd
+start-local-dev.bat
+```
+Runs Wrangler dev server with cloud AI models at `localhost:8787`.
+
+### Use Local AI Models
+```cmd
+start-ollama.bat
+setup-ollama-models.bat
+```
+Start Ollama server and download models for free offline development.
+
+**📘 Full instructions in [Deployment](#-deployment) section below.**
+
+---
+
 ## 🌟 Overview
 
 **DrewChatApp** is a sophisticated AI-powered chat application that bridges cloud-based AI models with local inference capabilities. Built on Cloudflare's edge infrastructure, it delivers blazing-fast responses with sub-100ms latency while supporting both premium cloud models and free local alternatives.
@@ -85,12 +110,14 @@ A production-ready, feature-rich AI chat application powered by Cloudflare Worke
 - **D1 Database**: Persistent user storage with Cloudflare D1 (SQLite)
 
 ### 🎨 User Experience
-- **Responsive Design**: Mobile-first UI that adapts to all screen sizes
-- **Dark/Light Mode**: Auto-switching based on system preferences
+- **Responsive Design**: Mobile-first UI that adapts to all screen sizes (375px to 4K)
+- **Dark/Light Theme Toggle**: Manual theme switcher with localStorage persistence + system preference detection
+- **Model Backend Indicator**: Visual badge showing ☁️ Cloud or 💻 Local model usage
 - **Syntax Highlighting**: Code blocks with language detection (via highlight.js)
 - **Markdown Rendering**: Rich text formatting with Marked.js
 - **Typing Indicators**: Visual feedback during AI response generation
 - **Model Selection**: Dynamic dropdown to switch between 22+ models
+- **Touch-Friendly**: 44x44px minimum touch targets for mobile devices
 
 ### ⚙️ Developer Features
 - **TypeScript**: Fully typed codebase with Workers AI SDK types
@@ -791,6 +818,42 @@ curl http://localhost:11434/api/chat -d '{
 
 ## 🚢 Deployment
 
+### Quick Start Scripts (Windows)
+
+Use these batch scripts for one-click operations:
+
+#### **Production Deployment**
+```cmd
+deploy-production.bat
+```
+Stages changes, commits to Git, pushes to GitHub, and deploys to Cloudflare Workers.
+
+#### **Local Development**
+```cmd
+start-local-dev.bat
+```
+Starts Wrangler dev server with Cloudflare Workers AI (cloud models).
+
+#### **Local Ollama Server**
+```cmd
+start-ollama.bat
+```
+Starts Ollama server on `localhost:11434` for free local models.
+
+#### **Ollama Model Setup**
+```cmd
+setup-ollama-models.bat
+```
+Interactive menu to download recommended Ollama models (1-8GB).
+
+#### **MCP Bridge (Web Search)**
+```cmd
+start-mcp-bridge.bat
+```
+Starts Docker container for web search via SearXNG.
+
+---
+
 ### Deploy to Cloudflare Workers
 
 #### Quick Deploy (Production)
@@ -799,15 +862,20 @@ curl http://localhost:11434/api/chat -d '{
 # Deploy with one command
 npm run deploy
 
-# Or use the batch script
-deploy.bat
+# Or use the batch script (Windows)
+deploy-production.bat
+
+# Or deploy directly
+npx wrangler deploy
 ```
 
 #### Manual Deployment
 
 ```bash
-# 1. Build the project
-npm run build
+# 1. Stage and commit changes
+git add .
+git commit -m "Your commit message"
+git push origin main
 
 # 2. Deploy to Cloudflare
 npx wrangler deploy
@@ -1108,6 +1176,72 @@ curl http://localhost:3001/api/search/status
 - Verify model supports streaming (all current models do)
 - Check browser console for JavaScript errors
 - Inspect network tab for closed SSE connection
+
+#### 9. Batch Scripts Not Working (Windows)
+
+**Symptom**: Double-clicking `.bat` files does nothing or shows errors
+
+**Solutions**:
+
+**A. "command not found" errors**:
+```cmd
+# Verify npm is in PATH
+where npm
+
+# If not found, add Node.js to system PATH:
+# System Properties > Environment Variables > Path
+# Add: C:\Program Files\nodejs\
+```
+
+**B. deploy-production.bat fails**:
+```cmd
+# Ensure Git is installed and authenticated
+git config --global user.name "Your Name"
+git config --global user.email "your@email.com"
+
+# Test Git access
+git status
+
+# If permission denied, set up SSH keys
+ssh-keygen -t ed25519 -C "your@email.com"
+```
+
+**C. start-ollama.bat says "Ollama not found"**:
+```cmd
+# Install Ollama first
+# Download from: https://ollama.ai/download/windows
+
+# Verify installation
+ollama --version
+
+# If not found, add to PATH manually
+set PATH=%PATH%;C:\Users\%USERNAME%\AppData\Local\Programs\Ollama
+```
+
+**D. setup-ollama-models.bat downloads fail**:
+```cmd
+# Check internet connection
+ping ollama.ai
+
+# Verify Ollama server is running
+start-ollama.bat
+
+# Wait 10 seconds, then retry download
+setup-ollama-models.bat
+```
+
+**E. start-mcp-bridge.bat fails**:
+```cmd
+# Ensure Docker Desktop is installed and running
+# Download from: https://www.docker.com/products/docker-desktop/
+
+# Verify Docker is running
+docker --version
+docker ps
+
+# If permission error, run as Administrator:
+# Right-click start-mcp-bridge.bat > Run as administrator
+```
 
 ### Debug Mode
 
@@ -1663,6 +1797,30 @@ A: With Ollama running, the app can work offline during development. Production 
 **Q: How do I add a custom domain?**
 
 A: See [Deployment → Custom Domain Setup](#custom-domain-setup) section above.
+
+**Q: How do I switch between dark and light themes?**
+
+A: Click the theme toggle button (🌙/☀️) in the header. Your preference is saved to localStorage and persists across sessions.
+
+**Q: What does the model indicator badge mean?**
+
+A: The badge shows which backend is active:
+- **☁️ Cloud** (purple): Using Cloudflare Workers AI
+- **💻 Local** (pink): Using Ollama on your machine
+- **⚠️ Offline** (red): Ollama server not detected
+
+**Q: Can I use local models in production?**
+
+A: No. Ollama models only work during local development (`npm run dev`). Production deployments on Cloudflare Workers must use cloud models (@cf/ prefix).
+
+**Q: How do I download more Ollama models?**
+
+A: Run `setup-ollama-models.bat` for an interactive menu, or use:
+```cmd
+ollama pull llama3.2:1b
+ollama pull qwen2.5-coder:7b
+```
+The model will appear in the dropdown after download completes.
 
 ---
 

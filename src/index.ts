@@ -442,8 +442,9 @@ async function handleChatRequest(
     }
 
     // Use Ollama for local models
-    console.log("Using local Ollama model:", requestedModel ?? OLLAMA_MODEL);
-    return await handleOllamaRequest(messages);
+    const ollamaModel = requestedModel ?? OLLAMA_MODEL;
+    console.log("Using local Ollama model:", ollamaModel);
+    return await handleOllamaRequest(messages, ollamaModel);
   } catch (error) {
     console.error("❌ Error processing chat request:", error);
     return new Response(
@@ -603,10 +604,11 @@ async function handleWorkersAiRequest(
  */
 async function handleOllamaRequest(
   messages: ChatMessage[],
+  model: string,
 ): Promise<Response> {
-  const modelToUse = selectedModel ?? OLLAMA_MODEL;
-  console.log("selectedModel value:", selectedModel);
-  console.log("selectedModel type:", typeof selectedModel);
+  const modelToUse = model ?? OLLAMA_MODEL;
+  console.log("Using Ollama model:", modelToUse);
+  console.log("Model type:", typeof modelToUse);
 
   const requestBody = {
     model: modelToUse,

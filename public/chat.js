@@ -1,9 +1,191 @@
 /* global marked, hljs, jspdf */
 
+/**
+ * ThemeManager - Handles dark/light theme switching with localStorage persistence
+ * and system preference detection
+ */
+class ThemeManager {
+  constructor() {
+    this.storageKey = 'techaboo-chat-theme';
+    this.themeToggleBtn = null;
+    this.themeIcon = null;
+  }
+
+  /**
+   * Detects system theme preference
+   * @returns {string} 'dark' or 'light'
+   */
+  getSystemTheme() {
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark';
+    }
+    return 'light';
+  }
+
+  /**
+   * Gets current theme from localStorage or system preference
+   * @returns {string} 'dark' or 'light'
+   */
+  getTheme() {
+    const savedTheme = localStorage.getItem(this.storageKey);
+    if (savedTheme === 'dark' || savedTheme === 'light') {
+      return savedTheme;
+    }
+    return this.getSystemTheme();
+  }
+
+  /**
+   * Applies theme to document and updates UI
+   * @param {string} theme - 'dark' or 'light'
+   */
+  applyTheme(theme) {
+    if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      if (this.themeIcon) {
+        this.themeIcon.textContent = '☀️'; // Sun icon for dark mode (click to go light)
+      }
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+      if (this.themeIcon) {
+        this.themeIcon.textContent = '🌙'; // Moon icon for light mode (click to go dark)
+      }
+    }
+    localStorage.setItem(this.storageKey, theme);
+  }
+
+  /**
+   * Toggles between dark and light themes
+   */
+  toggle() {
+    const currentTheme = this.getTheme();
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    this.applyTheme(newTheme);
+  }
+
+  /**
+   * Initializes theme manager
+   */
+  init() {
+    // Get theme toggle button
+    this.themeToggleBtn = document.getElementById('theme-toggle');
+    this.themeIcon = this.themeToggleBtn?.querySelector('.theme-icon');
+
+    if (!this.themeToggleBtn) {
+      console.warn('ThemeManager: theme-toggle button not found');
+      return;
+    }
+
+    // Apply saved or system theme
+    const currentTheme = this.getTheme();
+    this.applyTheme(currentTheme);
+
+    // Add click listener
+    this.themeToggleBtn.addEventListener('click', () => {
+      this.toggle();
+    });
+
+    // Listen for system theme changes
+    if (window.matchMedia) {
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+        // Only auto-switch if user hasn't manually set a preference
+        const savedTheme = localStorage.getItem(this.storageKey);
+        if (!savedTheme) {
+          const newTheme = e.matches ? 'dark' : 'light';
+          this.applyTheme(newTheme);
+        }
+      });
+    }
+
+    console.log('ThemeManager initialized with theme:', currentTheme);
+  }
+}
+
+/**
+ * ModelIndicatorManager - Shows which backend (Cloud/Local) is being used
+ */
+class ModelIndicatorManager {
+  constructor() {
+    this.indicator = null;
+    this.modelSelect = null;
+  }
+
+  init() {
+    this.indicator = document.getElementById('model-indicator');
+    this.modelSelect = document.getElementById('model-select');
+
+    if (!this.indicator || !this.modelSelect) {
+      console.warn('ModelIndicatorManager: Required elements not found');
+      return;
+    }
+
+    // Update indicator when model changes
+    this.modelSelect.addEventListener('change', () => this.updateIndicator());
+    
+    // Initial update
+    this.updateIndicator();
+    
+    // Check Ollama status
+    this.checkOllamaStatus();
+    
+    console.log('ModelIndicatorManager initialized');
+  }
+
+  updateIndicator() {
+    if (!this.indicator || !this.modelSelect) return;
+
+    const selectedModel = this.modelSelect.value;
+    const isCloudModel = selectedModel.startsWith('@cf/');
+
+    if (isCloudModel) {
+      this.indicator.className = 'model-indicator cloud';
+      this.indicator.innerHTML = '☁️ Cloud';
+      this.indicator.title = 'Using Cloudflare Workers AI';
+    } else {
+      this.indicator.className = 'model-indicator local';
+      this.indicator.innerHTML = '💻 Local';
+      this.indicator.title = 'Using local Ollama';
+    }
+  }
+
+  async checkOllamaStatus() {
+    try {
+      const response = await fetch('/api/models');
+      if (!response.ok) return;
+      
+      const data = await response.json();
+      const currentModel = this.modelSelect?.value || '';
+      
+      // If user selected a local model but Ollama is unavailable
+      if (!currentModel.startsWith('@cf/') && !data.available) {
+        this.setOffline();
+      }
+    } catch (error) {
+      console.log('Could not check Ollama status:', error);
+    }
+  }
+
+  setOffline() {
+    if (!this.indicator) return;
+    this.indicator.className = 'model-indicator offline';
+    this.indicator.innerHTML = '⚠️ Offline';
+    this.indicator.title = 'Ollama not available - falling back to cloud';
+  }
+}
+
 // Authentication disabled - direct access to chat
 // Session management functions kept for compatibility but not enforced
 
+// Initialize theme manager and model indicator on page load
+const themeManager = new ThemeManager();
+const modelIndicatorManager = new ModelIndicatorManager();
+
 document.addEventListener("DOMContentLoaded", () => {
+  // Initialize theme system
+  themeManager.init();
+  
+  // Initialize model indicator
+  modelIndicatorManager.init();
+  
   // Auth check disabled - user can access chat directly
   console.log("Authentication disabled - direct access enabled");
 });
@@ -694,10 +876,16 @@ async function sendMessage() {
       saveConversations();
     }
   } catch (error) {
-    console.error("Error sending message", error);
+    console.error("❌ Error sending message:", error);
+    console.error("❌ Error details:", {
+      message: error.message,
+      stack: error.stack,
+      model: selectedModel
+    });
     const assistantMessage = getActiveConversation()?.messages.at(-1);
     if (assistantMessage) {
-      assistantMessage.content = "Sorry, something went wrong. Please try again.";
+      const errorMsg = error.message ? `Error: ${error.message}` : "Sorry, something went wrong. Please try again.";
+      assistantMessage.content = errorMsg;
       updateLastAssistantMessage(assistantMessage.content);
       saveConversations();
     }
@@ -878,6 +1066,10 @@ async function selectModel(modelId) {
     selectedModel = modelId;
     renderModelOptions();
     renderModelList();
+    // Update model indicator
+    if (modelIndicatorManager) {
+      modelIndicatorManager.updateIndicator();
+    }
   } catch (error) {
     console.error("Failed to select model", error);
   }
