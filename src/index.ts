@@ -482,12 +482,22 @@ async function handleWorkersAiRequest(
     
     let aiResponse;
     if (isResponsesApiModel) {
-      // For Responses API models, send messages array as 'input'
-      // The Responses API accepts an array of message objects directly
-      console.log("📤 Sending to AI (Responses API with array input)");
+      // For Responses API models (GPT-OSS), use 'instructions' and 'input' format
+      // Extract system message as instructions, and user messages as input
+      const systemMessage = messages.find(m => m.role === 'system');
+      const userMessages = messages.filter(m => m.role !== 'system');
+      
+      // Convert to simple string input (last user message)
+      const lastUserMessage = userMessages.filter(m => m.role === 'user').pop();
+      const inputText = lastUserMessage ? lastUserMessage.content : messages[messages.length - 1]?.content || 'Hello';
+      
+      console.log("📤 Sending to AI (Responses API format)");
+      console.log("   Instructions:", systemMessage?.content.substring(0, 50) || "none");
+      console.log("   Input:", inputText.substring(0, 50));
+      
       aiResponse = await env.AI.run(model as any, {
-        input: messages,
-        stream: true,
+        instructions: systemMessage?.content || 'You are a helpful assistant.',
+        input: inputText,
       });
     } else {
       // Standard chat models use messages format
@@ -797,11 +807,6 @@ async function handleListModels(): Promise<Response> {
   const workersAiModels = [
     // --- General Purpose Models ---
     {
-      name: "@cf/openai/gpt-oss-120b",
-      description: "☁️ GPT-OSS 120B - OpenAI's powerful reasoning model",
-      size: null,
-    },
-    {
       name: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
       description: "☁️ Llama 3.3 70B - Meta's flagship model (fast)",
       size: null,
@@ -826,6 +831,38 @@ async function handleListModels(): Promise<Response> {
       description: "☁️ Mistral 7B - Excellent reasoning",
       size: null,
     },
+    {
+      name: "@cf/mistralai/mistral-7b-instruct-v0.2",
+      description: "☁️ Mistral 7B v0.2 - 32K context window",
+      size: null,
+    },
+    {
+      name: "@cf/google/gemma-3-12b-it",
+      description: "☁️ Gemma 3 12B - Multimodal, 128K context, 140+ languages",
+      size: null,
+    },
+    {
+      name: "@cf/google/gemma-7b-it",
+      description: "☁️ Gemma 7B - Lightweight Google model",
+      size: null,
+    },
+    {
+      name: "@cf/meta/llama-3.2-11b-vision-instruct",
+      description: "👁️ Llama 3.2 Vision 11B - Image reasoning & captioning",
+      size: null,
+    },
+    {
+      name: "@cf/meta/llama-guard-3-8b",
+      description: "🛡️ Llama Guard 3 8B - Content safety classification",
+      size: null,
+    },
+    
+    // --- Reasoning Models ---
+    {
+      name: "@cf/qwen/qwq-32b",
+      description: "🧠 QwQ 32B - Advanced reasoning (like o1-mini)",
+      size: null,
+    },
     
     // --- Code-Specialized Models ---
     {
@@ -836,6 +873,28 @@ async function handleListModels(): Promise<Response> {
     {
       name: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
       description: "🔧 DeepSeek R1 32B - Reasoning-focused coding",
+      size: null,
+    },
+    
+    // --- LoRA-Enabled Models (for fine-tuning) ---
+    {
+      name: "@cf/google/gemma-7b-it-lora",
+      description: "🎯 Gemma 7B LoRA - Fine-tunable Google model",
+      size: null,
+    },
+    {
+      name: "@cf/google/gemma-2b-it-lora",
+      description: "🎯 Gemma 2B LoRA - Lightweight fine-tunable model",
+      size: null,
+    },
+    {
+      name: "@cf/meta-llama/llama-2-7b-chat-hf-lora",
+      description: "🎯 Llama 2 7B LoRA - Fine-tunable Meta model",
+      size: null,
+    },
+    {
+      name: "@cf/mistralai/mistral-7b-instruct-v0.2-lora",
+      description: "🎯 Mistral 7B v0.2 LoRA - Fine-tunable 32K context",
       size: null,
     },
   ];
