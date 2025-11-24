@@ -407,18 +407,23 @@ async function handleChatRequest(
 ): Promise<Response> {
   try {
     // Parse JSON request body
-    const { messages = [], webSearch = false } = (await request.json()) as {
+    const { messages = [], model, webSearch = false } = (await request.json()) as {
       messages: ChatMessage[];
+      model?: string;
       webSearch?: boolean;
     };
 
-    console.log("💬 Chat request - Web search enabled:", webSearch);
+    console.log("💬 Chat request - Model:", model, "Web search enabled:", webSearch);
 
     // Add system prompt if not present
     if (!messages.some((msg) => msg.role === "system")) {
       messages.unshift({ role: "system", content: SYSTEM_PROMPT });
     }
 
+    // Determine which model to use
+    const requestedModel = model || selectedModel;
+    const isWorkersAiModel = requestedModel && requestedModel.startsWith("@cf/");
+    
     // Check if Ollama is available for local development
     const useOllama = await isOllamaAvailable();
 
@@ -440,16 +445,43 @@ async function handleChatRequest(
       }
     }
 
-    if (useOllama) {
-      console.log("Using local Ollama model:", selectedModel ?? OLLAMA_MODEL);
-      return await handleOllamaRequest(messages);
+    // Use Workers AI if requested model is a cloud model OR if Ollama is not available
+    if (isWorkersAiModel || !useOllama) {
+      const workersModel = isWorkersAiModel ? requestedModel : MODEL_ID;
+      console.log("Using Cloudflare Workers AI model:", workersModel);
+      return await handleWorkersAiRequest(messages, workersModel, env);
     }
 
-    console.log("Using Cloudflare Workers AI model:", MODEL_ID);
+    // Use Ollama for local models
+    console.log("Using local Ollama model:", requestedModel ?? OLLAMA_MODEL);
+    return await handleOllamaRequest(messages);
+  } catch (error) {
+    console.error("❌ Error processing chat request:", error);
+    return new Response(
+      JSON.stringify({ 
+        error: "Failed to process request",
+        details: error instanceof Error ? error.message : String(error)
+      }),
+      {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      },
+    );
+  }
+}
 
+/**
+ * Handles requests to Workers AI
+ */
+async function handleWorkersAiRequest(
+  messages: ChatMessage[],
+  model: string,
+  env: Env,
+): Promise<Response> {
+  try {
     // Use Workers AI with streaming
     const aiResponse = await env.AI.run(
-      MODEL_ID,
+      model as any,
       {
         messages,
         max_tokens: 1024,
@@ -530,19 +562,10 @@ async function handleChatRequest(
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
       },
-    });
-  } catch (error) {
-    console.error("❌ Error processing chat request:", error);
-    return new Response(
-      JSON.stringify({ 
-        error: "Failed to process request",
-        details: error instanceof Error ? error.message : String(error)
-      }),
-      {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      },
     );
+  } catch (error) {
+    console.error("❌ Error with Workers AI:", error);
+    throw error;
   }
 }
 
@@ -705,18 +728,34 @@ async function handleListModels(): Promise<Response> {
       const data = (await response.json()) as { models: Array<{ name: string; size: number }> };
 
       const availableModels = [
-        { name: "llama3.2:1b", description: "Tiny & fast (1.3 GB)", size: 1321098329 },
-        { name: "llama3.2:3b", description: "Small & balanced (2 GB)", size: 2000000000 },
-        { name: "phi3:mini", description: "Microsoft Phi-3 Mini (2.3 GB)", size: 2300000000 },
-        { name: "gemma2:2b", description: "Google Gemma 2B (1.6 GB)", size: 1600000000 },
-        { name: "qwen2.5:1.5b", description: "Qwen 2.5 1.5B (1 GB)", size: 1000000000 },
-        // Coding-optimized models (4GB and under)
+        // Small models (under 2GB)
+        { name: "llama3.2:1b", description: "Llama 3.2 1B - Tiny & fast (1.3 GB)", size: 1321098329 },
+        { name: "qwen2.5:1.5b", description: "Qwen 2.5 1.5B - Efficient (1 GB)", size: 1000000000 },
+        { name: "gemma2:2b", description: "Gemma 2B - Google (1.6 GB)", size: 1600000000 },
+        
+        // Medium models (2-4GB)
+        { name: "llama3.2:3b", description: "Llama 3.2 3B - Balanced (2 GB)", size: 2000000000 },
+        { name: "phi3:mini", description: "Phi-3 Mini - Microsoft (2.3 GB)", size: 2300000000 },
+        { name: "qwen2.5:3b", description: "Qwen 2.5 3B - Strong performance (2.2 GB)", size: 2200000000 },
+        
+        // Coding-specialized models (under 4GB)
         { name: "qwen2.5-coder:0.5b", description: "🔧 Qwen Coder 0.5B - Ultra-fast coding (398 MB)", size: 398000000 },
-        { name: "qwen2.5-coder:1.5b", description: "🔧 Qwen Coder 1.5B - Best balance for coding (986 MB)", size: 986000000 },
+        { name: "qwen2.5-coder:1.5b", description: "🔧 Qwen Coder 1.5B - Best coding balance (986 MB)", size: 986000000 },
         { name: "deepseek-coder:1.3b", description: "🔧 DeepSeek Coder 1.3B - Code specialist (776 MB)", size: 776000000 },
-        { name: "codegemma:2b", description: "🔧 CodeGemma 2B - Google's code model (1.6 GB)", size: 1600000000 },
+        { name: "codegemma:2b", description: "🔧 CodeGemma 2B - Google code model (1.6 GB)", size: 1600000000 },
         { name: "starcoder2:3b", description: "🔧 StarCoder2 3B - 600+ languages (1.7 GB)", size: 1700000000 },
         { name: "qwen2.5-coder:3b", description: "🔧 Qwen Coder 3B - Advanced coding (1.9 GB)", size: 1900000000 },
+        
+        // Larger models (4-8GB) - More capable
+        { name: "llama3.1:8b", description: "Llama 3.1 8B - High capability (4.7 GB)", size: 4700000000 },
+        { name: "llama3.2:3b-instruct-q8_0", description: "Llama 3.2 3B Q8 - High precision (3.4 GB)", size: 3400000000 },
+        { name: "mistral:7b", description: "Mistral 7B - Excellent reasoning (4.1 GB)", size: 4100000000 },
+        { name: "gemma2:9b", description: "Gemma 2 9B - Google's best small model (5.4 GB)", size: 5400000000 },
+        { name: "qwen2.5:7b", description: "Qwen 2.5 7B - Strong all-around (4.7 GB)", size: 4700000000 },
+        { name: "qwen2.5-coder:7b", description: "🔧 Qwen Coder 7B - Professional coding (4.7 GB)", size: 4700000000 },
+        { name: "deepseek-coder-v2:16b", description: "🔧 DeepSeek V2 16B - Advanced coding (8.9 GB)", size: 8900000000 },
+        { name: "codellama:7b", description: "🔧 CodeLlama 7B - Meta's code model (3.8 GB)", size: 3800000000 },
+        { name: "phi3:14b", description: "Phi-3 14B - Microsoft's powerful model (7.9 GB)", size: 7900000000 },
       ];
 
       return new Response(
@@ -738,23 +777,33 @@ async function handleListModels(): Promise<Response> {
   // Fallback to Workers AI models when Ollama is unavailable
   const workersAiModels = [
     {
-      name: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-      description: "Meta Llama 3.3 70B (Instruct)",
+      name: "@cf/openai/gpt-oss-120b",
+      description: "☁️ GPT-OSS 120B - OpenAI's powerful reasoning model",
       size: null,
     },
     {
-      name: "@cf/mistral/mistral-7b-instruct-v0.1",
-      description: "Mistral 7B (Instruct v0.1)",
+      name: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      description: "☁️ Llama 3.3 70B - Meta's flagship model (fast)",
+      size: null,
+    },
+    {
+      name: "@cf/meta/llama-3.1-8b-instruct-fast",
+      description: "☁️ Llama 3.1 8B - Fast & efficient",
       size: null,
     },
     {
       name: "@cf/meta/llama-3.1-8b-instruct",
-      description: "Meta Llama 3.1 8B (Instruct)",
+      description: "☁️ Llama 3.1 8B - Standard quality",
       size: null,
     },
     {
-      name: "@cf/openchat/openchat-3.5-0106",
-      description: "OpenChat 3.5",
+      name: "@cf/qwen/qwen1.5-14b-chat-awq",
+      description: "☁️ Qwen 1.5 14B - Strong Chinese & English",
+      size: null,
+    },
+    {
+      name: "@cf/mistral/mistral-7b-instruct-v0.1",
+      description: "☁️ Mistral 7B - Excellent reasoning",
       size: null,
     },
   ];

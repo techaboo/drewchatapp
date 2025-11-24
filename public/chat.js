@@ -940,24 +940,25 @@ function renderModelList() {
     return;
   }
 
+  // Ollama is available - show both installed and downloadable
   const installed = availableModels.filter((model) => model.availableLocally);
-  const downloadable = availableModels.filter((model) => !model.availableLocally);
+  const downloadable = availableModels.filter((model) => !model.availableLocally && !model.id.startsWith("@cf/"));
 
   if (installed.length) {
     const heading = document.createElement("h3");
-    heading.textContent = "Installed";
+    heading.textContent = "Installed (Local)";
     modelList.appendChild(heading);
     installed.forEach((model) => {
-      modelList.appendChild(createModelCard(model, true));
+      modelList.appendChild(createModelCard(model, true, false));
     });
   }
 
   if (downloadable.length) {
     const heading = document.createElement("h3");
-    heading.textContent = "Available";
+    heading.textContent = "Available for Download";
     modelList.appendChild(heading);
     downloadable.forEach((model) => {
-      modelList.appendChild(createModelCard(model, false));
+      modelList.appendChild(createModelCard(model, false, false));
     });
   }
 }
