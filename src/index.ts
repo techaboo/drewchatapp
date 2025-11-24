@@ -257,7 +257,8 @@ const testUsers: Record<string, { id: string; email: string; passwordHash: strin
 const pendingRegistrations: Record<string, { email: string; tempPassword: string; timestamp: number }> = {};
 
 // Global model selection (stored in-memory for this session)
-let selectedModel = OLLAMA_MODEL;
+// Initialize with Workers AI default since Ollama won't be available on Cloudflare
+let selectedModel = MODEL_ID;
 
 /**
  * Detects if Ollama is running locally
@@ -781,12 +782,15 @@ async function handleListModels(): Promise<Response> {
     },
   ];
 
+  // Return the currently selected model if it's a Workers AI model, otherwise use default
+  const currentModel = selectedModel.startsWith("@cf/") ? selectedModel : MODEL_ID;
+
   return new Response(
     JSON.stringify({
       available: false,
       installedModels: [],
       availableModels: workersAiModels,
-      currentModel: MODEL_ID,
+      currentModel: currentModel,
     }),
     {
       headers: { "Content-Type": "application/json" },
@@ -849,15 +853,9 @@ async function handleSelectModel(request: Request): Promise<Response> {
       );
     }
 
-    // Update selectedModel based on whether it's Workers AI or Ollama
-    if (newModel.startsWith("@cf/")) {
-      // It's a Workers AI model
-      console.log("Selected Workers AI model:", newModel);
-    } else {
-      // It's an Ollama model
-      selectedModel = newModel;
-      console.log("Selected Ollama model:", newModel);
-    }
+    // Update selectedModel for both Workers AI and Ollama models
+    selectedModel = newModel;
+    console.log("Selected model:", newModel, "Type:", newModel.startsWith("@cf/") ? "Workers AI" : "Ollama");
 
     return new Response(
       JSON.stringify({ success: true, currentModel: newModel }),
