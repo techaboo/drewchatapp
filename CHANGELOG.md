@@ -10,15 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 #### Vision Model License Agreement
-- **Automatic License Acceptance**: Vision models (Llama 3.2 Vision 11B) now automatically accept Meta's license on first use
-  - Backend sends "agree" message before processing vision model requests
-  - Resolves error 5016: "Prior to using this model, you must submit the prompt 'agree'"
-  - Graceful error handling with user-friendly messages
-  - Documented license requirements in README
+- **Improved License Handling**: Vision models (Llama 3.2 Vision 11B) now have better license acceptance flow
+  - Backend attempts automatic license agreement with streaming support
+  - If automatic fails, returns 403 with clear manual instructions
+  - Error response includes license URLs and wrangler command
+  - User-friendly error message: "Vision Model License Required"
+  - Added "(requires license acceptance)" note to model description
+  
+- **Manual Acceptance Command**:
+  ```bash
+  npx wrangler ai run @cf/meta/llama-3.2-11b-vision-instruct --prompt "agree"
+  ```
+
+- **Documented Requirements**:
+  - License: https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE
+  - Acceptable Use Policy: https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/USE_POLICY.md
+  - Geographic restriction: Not available to EU-based users/companies
 
 **Files Changed**:
-- `src/index.ts` - Added vision model detection and automatic license agreement
-- `README.md` - Added Vision Model License Error troubleshooting section
+- `src/index.ts` - Improved license agreement with streaming, better error handling
+- `README.md` - Added detailed troubleshooting with manual acceptance steps
 
 ---
 

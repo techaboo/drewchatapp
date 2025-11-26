@@ -1106,17 +1106,19 @@ The app automatically sends the "agree" message on first use. If you see this er
    - The backend automatically accepts license on first vision model use
    - No user action required
 
-2. **If error persists**:
-   - Try a different model first (non-vision)
-   - Then retry vision model
-   - Check console logs for "License agreement accepted"
-
-3. **Manual acceptance** (if needed):
+2. **Manual acceptance** (required if automatic fails):
    ```bash
-   # Via Wrangler (one-time)
-   npx wrangler ai run @cf/meta/llama-3.2-11b-vision-instruct \
-     --message "agree"
+   # Via Wrangler (one-time setup)
+   npx wrangler ai run @cf/meta/llama-3.2-11b-vision-instruct --prompt "agree"
    ```
+   
+   This sends "agree" to Meta's license server and enables vision models for your account.
+
+3. **If still not working**:
+   - Ensure you're not in the EU or a company based in the EU (license restriction)
+   - Check Cloudflare Workers AI dashboard for account status
+   - Try logging out and back in: `npx wrangler logout && npx wrangler login`
+   - Use a different model temporarily while investigating
 
 **License Links**:
 - [Llama 3.2 License](https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE)

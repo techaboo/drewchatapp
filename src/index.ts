@@ -477,14 +477,31 @@ async function handleWorkersAiRequest(
     if (isVisionModel) {
       console.log("👁️ Vision model detected - sending license agreement");
       try {
-        // Send "agree" message to accept license terms
-        await env.AI.run(model as any, {
+        // Send "agree" message to accept license terms with streaming enabled
+        const agreementResponse = await env.AI.run(model as any, {
           messages: [{ role: "user", content: "agree" }],
-          max_tokens: 1,
+          stream: true,
         });
+        
+        // Consume the stream to complete the agreement
+        const stream = agreementResponse as ReadableStream<Uint8Array>;
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        
+        // Read all chunks to ensure the agreement is processed
+        while (true) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+        
         console.log("✅ License agreement accepted for vision model");
       } catch (agreementError) {
-        console.log("⚠️ License agreement attempt completed (may already be accepted)");
+        const errMsg = agreementError instanceof Error ? agreementError.message : String(agreementError);
+        console.log("⚠️ License agreement error:", errMsg);
+        // If it's not a license error, it means license was already accepted
+        if (!errMsg.includes('5016') && !errMsg.includes('agree')) {
+          console.log("✅ License likely already accepted");
+        }
       }
     }
 
@@ -615,9 +632,21 @@ async function handleWorkersAiRequest(
     
     // Check if this is a license agreement error
     if (errorMessage.includes('5016') || errorMessage.includes('agree')) {
-      throw new Error(
-        `Vision model requires license acceptance. The system attempted to accept the license automatically, but it may have failed. ` +
-        `License: https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE`
+      return new Response(
+        JSON.stringify({ 
+          error: "Vision Model License Required",
+          details: "Llama 3.2 Vision models require accepting Meta's Community License. " +
+                   "To use this model, you must manually accept the license by running: " +
+                   "wrangler ai run @cf/meta/llama-3.2-11b-vision-instruct --message 'agree' " +
+                   "License: https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE " +
+                   "By using this model, you agree that you are not in the EU or a company with principal place of business in the EU.",
+          license_url: "https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE",
+          acceptable_use: "https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/USE_POLICY.md"
+        }),
+        {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        }
       );
     }
     
@@ -876,7 +905,7 @@ async function handleListModels(): Promise<Response> {
     },
     {
       name: "@cf/meta/llama-3.2-11b-vision-instruct",
-      description: "👁️ Llama 3.2 Vision 11B - Image reasoning & captioning",
+      description: "👁️ Llama 3.2 Vision 11B - Image reasoning & captioning (requires license acceptance)",
       size: null,
     },
     {
