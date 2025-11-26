@@ -547,6 +547,8 @@ const MODELS = [
 |-------|-------------|-------|
 | **Llama 3.2 Vision 11B** | Image understanding, OCR, visual QA | Text + Images |
 
+> **Note**: Vision models automatically accept the [Llama 3.2 License](https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE) on first use. By using this model, you agree to Meta's Community License and Acceptable Use Policy.
+
 ### Safety & Moderation (1 model)
 
 | Model | Purpose | Output |
@@ -1090,7 +1092,39 @@ killall ollama
 ollama serve
 ```
 
-#### 4. Database Migration Errors
+#### 4. Vision Model License Error
+
+**Symptom**: Error 5016 - "Prior to using this model, you must submit the prompt 'agree'"
+
+**What This Means**: Llama 3.2 Vision models require accepting Meta's license agreement.
+
+**Solution**:
+
+The app automatically sends the "agree" message on first use. If you see this error:
+
+1. **Automatic handling** (already implemented in v1.1.0):
+   - The backend automatically accepts license on first vision model use
+   - No user action required
+
+2. **If error persists**:
+   - Try a different model first (non-vision)
+   - Then retry vision model
+   - Check console logs for "License agreement accepted"
+
+3. **Manual acceptance** (if needed):
+   ```bash
+   # Via Wrangler (one-time)
+   npx wrangler ai run @cf/meta/llama-3.2-11b-vision-instruct \
+     --message "agree"
+   ```
+
+**License Links**:
+- [Llama 3.2 License](https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE)
+- [Acceptable Use Policy](https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/USE_POLICY.md)
+
+> By using vision models, you agree that you are not in the EU or a company with principal place of business in the EU.
+
+#### 5. Database Migration Errors
 
 **Symptom**: `Error: table users already exists`
 

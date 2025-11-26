@@ -472,6 +472,22 @@ async function handleWorkersAiRequest(
     console.log("🤖 Workers AI Request - Model:", model);
     console.log("📝 Messages count:", messages.length);
     
+    // Check if this is a vision model that requires license agreement
+    const isVisionModel = model.includes('vision');
+    if (isVisionModel) {
+      console.log("👁️ Vision model detected - sending license agreement");
+      try {
+        // Send "agree" message to accept license terms
+        await env.AI.run(model as any, {
+          messages: [{ role: "user", content: "agree" }],
+          max_tokens: 1,
+        });
+        console.log("✅ License agreement accepted for vision model");
+      } catch (agreementError) {
+        console.log("⚠️ License agreement attempt completed (may already be accepted)");
+      }
+    }
+
     // Check if this is a Responses API model (like GPT-OSS-120B)
     // These models use 'input' parameter instead of 'messages'
     // GPT-OSS models can accept input as either:
@@ -590,11 +606,21 @@ async function handleWorkersAiRequest(
     });
   } catch (error) {
     console.error("❌ Error with Workers AI:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("❌ Error details:", {
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage,
       stack: error instanceof Error ? error.stack : undefined,
       model: model
     });
+    
+    // Check if this is a license agreement error
+    if (errorMessage.includes('5016') || errorMessage.includes('agree')) {
+      throw new Error(
+        `Vision model requires license acceptance. The system attempted to accept the license automatically, but it may have failed. ` +
+        `License: https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE`
+      );
+    }
+    
     throw error;
   }
 }

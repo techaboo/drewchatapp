@@ -5,6 +5,23 @@ All notable changes to DrewChatApp will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2025-11-26
+
+### Fixed
+
+#### Vision Model License Agreement
+- **Automatic License Acceptance**: Vision models (Llama 3.2 Vision 11B) now automatically accept Meta's license on first use
+  - Backend sends "agree" message before processing vision model requests
+  - Resolves error 5016: "Prior to using this model, you must submit the prompt 'agree'"
+  - Graceful error handling with user-friendly messages
+  - Documented license requirements in README
+
+**Files Changed**:
+- `src/index.ts` - Added vision model detection and automatic license agreement
+- `README.md` - Added Vision Model License Error troubleshooting section
+
+---
+
 ## [1.1.0] - 2025-01-24
 
 ### Added
