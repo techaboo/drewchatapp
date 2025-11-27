@@ -5,6 +5,44 @@ All notable changes to DrewChatApp will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2025-11-26
+
+### Fixed
+
+#### File Attachment Processing
+- **Improved File Formatting**: Files now formatted in AI-readable markdown structure
+  - Code files wrapped in syntax-highlighted code blocks with language detection
+  - Markdown files preserve original formatting
+  - Text files wrapped in plain code blocks
+  - Clear file boundaries with `📎 Attached File:` markers
+  
+- **Better File Context**:
+  - Files now appear **before** user message so AI sees content first
+  - Automatic file type detection from extension (.js, .py, .md, etc.)
+  - File size displayed in KB for transparency
+  - Default prompt added if user attaches file without message
+  
+- **Enhanced System Prompt**:
+  - AI explicitly instructed to read and analyze attached files
+  - References code blocks with syntax highlighting
+  - Emphasizes citing specific parts of files in responses
+  
+- **Updated Documentation**:
+  - README now includes comprehensive File Attachments section
+  - Lists all supported file types (code, documents, text)
+  - Provides example prompts and tips for best results
+  - Recommends specific models for code analysis
+
+**Files Changed**:
+- `public/chat.js` - Improved file content formatting with markdown code blocks
+- `src/index.ts` - Enhanced system prompt to handle file attachments
+- `README.md` - Added detailed File Attachments usage guide
+
+**Before**: Files were appended as plain text with minimal formatting
+**After**: Files are properly formatted markdown with syntax highlighting and clear structure
+
+---
+
 ## [1.1.1] - 2025-11-26
 
 ### Fixed

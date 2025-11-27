@@ -760,8 +760,35 @@ async function sendMessage() {
   const conversation = getActiveConversation();
   if (!conversation) return;
 
-  const userContent = [trimmed, ...pendingFileAttachments.map((file) => `\n\n\n---\nFile: ${file.name}\n\n\n${file.content}`)]
-    .join("\n").trim();
+  // Format file attachments in a clear, structured way that AI models can understand
+  let userContent = trimmed;
+  
+  if (pendingFileAttachments.length > 0) {
+    const fileContents = pendingFileAttachments.map((file) => {
+      // Determine file type from extension
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      const isCode = ['js', 'ts', 'py', 'java', 'cpp', 'c', 'cs', 'go', 'rs', 'rb', 'php', 'html', 'css', 'json', 'xml', 'yaml', 'yml', 'sh', 'bash'].includes(ext);
+      const isMarkdown = ext === 'md';
+      const isText = ['txt', 'log', 'csv'].includes(ext);
+      
+      // Use appropriate formatting based on file type
+      let formattedContent = '';
+      if (isCode) {
+        formattedContent = `\`\`\`${ext}\n${file.content}\n\`\`\``;
+      } else if (isMarkdown) {
+        formattedContent = file.content;
+      } else {
+        formattedContent = `\`\`\`\n${file.content}\n\`\`\``;
+      }
+      
+      return `\n\n---\n**📎 Attached File: ${file.name}** (${Math.round(file.size / 1024)} KB)\n\n${formattedContent}`;
+    }).join('\n');
+    
+    // Prepend files before the user's message so AI sees context first
+    userContent = fileContents + '\n\n---\n\n' + (trimmed || 'Please analyze the attached file(s).');
+  }
+  
+  userContent = userContent.trim();
 
   if (!userContent) return;
 

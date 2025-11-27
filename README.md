@@ -362,13 +362,41 @@ You: What are the latest AI advancements in 2025?
 AI: [Searches web, then synthesizes results...]
 ```
 
-### File Uploads
+### File Attachments
 
-Attach files to analyze code, documents, or images:
+Upload and discuss documents, code, or text files:
 
-1. Click the 📎 attachment icon
-2. Select file (max 10MB)
-3. Model processes content and responds
+**How It Works**:
+1. Click **"Attach files"** button (📎 icon)
+2. Select one or more files (max 2MB each)
+3. Files appear as tags below the input box
+4. Type your question or leave blank for automatic analysis
+5. Send message - AI reads and analyzes the file contents
+
+**Supported File Types**:
+- **Code**: `.js`, `.ts`, `.py`, `.java`, `.cpp`, `.go`, `.rs`, `.rb`, `.php`, `.html`, `.css`, `.json`, `.xml`, `.yaml`
+- **Documents**: `.txt`, `.md`, `.csv`, `.log`
+- **Others**: Any text-based file under 2MB
+
+**File Formatting**:
+- Code files: Automatically wrapped in syntax-highlighted code blocks
+- Markdown files: Rendered with original formatting
+- Text files: Wrapped in plain code blocks
+
+**Tips for Best Results**:
+- Ask specific questions: "What does this function do?" or "Find bugs in this code"
+- Use larger models for complex code: Llama 3.3 70B, Qwen 2.5 Coder 32B
+- Attach multiple related files together for context
+- File contents appear before your message so AI sees them first
+
+**Example Prompts**:
+```
+"Explain this code"
+"Find security vulnerabilities"
+"Convert this Python to JavaScript"
+"Summarize this document"
+"What are the main functions?"
+```
 
 ### Authentication
 

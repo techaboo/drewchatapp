@@ -248,7 +248,10 @@ const OLLAMA_MODEL = "llama3.2:1b";
 
 // Default system prompt
 const SYSTEM_PROMPT =
-  "You are a helpful, friendly assistant. Provide concise and accurate responses.";
+  "You are a helpful, friendly assistant. Provide concise and accurate responses. " +
+  "When the user attaches files (marked with 📎 Attached File:), carefully read and analyze the file contents. " +
+  "Code files will be in markdown code blocks with syntax highlighting. " +
+  "Always reference specific parts of attached files when answering questions about them.";
 
 // In-memory user storage for testing (will be replaced by D1 in production)
 const testUsers: Record<string, { id: string; email: string; passwordHash: string; approved?: boolean }> = {};
