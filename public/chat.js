@@ -135,8 +135,13 @@ class ModelIndicatorManager {
 
     const selectedModel = this.modelSelect.value;
     const isCloudModel = selectedModel.startsWith('@cf/');
+    const isOpenAiModel = selectedModel.startsWith('openai/');
 
-    if (isCloudModel) {
+    if (isOpenAiModel) {
+      this.indicator.className = 'model-indicator cloud';
+      this.indicator.innerHTML = '🔌 OpenAI';
+      this.indicator.title = 'Using configured OpenAI-compatible provider';
+    } else if (isCloudModel) {
       this.indicator.className = 'model-indicator cloud';
       this.indicator.innerHTML = '☁️ Cloud';
       this.indicator.title = 'Using Cloudflare Workers AI';
@@ -1026,6 +1031,7 @@ function renderModelOptions() {
 
   const localModels = availableModels.filter((model) => model.availableLocally);
   const cloudModels = availableModels.filter((model) => model.id.startsWith("@cf/"));
+  const openAiModels = availableModels.filter((model) => model.id.startsWith("openai/"));
 
   // Add local models section
   if (localModels.length > 0) {
@@ -1059,8 +1065,22 @@ function renderModelOptions() {
     modelSelect.appendChild(cloudGroup);
   }
 
+  if (openAiModels.length > 0) {
+    const providerGroup = document.createElement("optgroup");
+    providerGroup.label = "🔌 OpenAI-compatible Provider";
+    openAiModels.forEach((model) => {
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = model.label || model.id;
+      option.title = model.description || "";
+      option.selected = model.id === selectedModel;
+      providerGroup.appendChild(option);
+    });
+    modelSelect.appendChild(providerGroup);
+  }
+
   // Fallback if no models available
-  if (localModels.length === 0 && cloudModels.length === 0) {
+  if (localModels.length === 0 && cloudModels.length === 0 && openAiModels.length === 0) {
     const option = document.createElement("option");
     option.textContent = "No models available";
     modelSelect.appendChild(option);
@@ -1420,19 +1440,15 @@ function restoreState() {
 async function checkWebSearchAvailability() {
   try {
     const response = await fetch("/api/search/status");
-    if (!response.ok) return;
-    
-    const data = await response.json();
     const webSearchToggle = document.getElementById("web-search-toggle");
     const webSearchLabel = webSearchToggle?.parentElement;
-    
+
     if (webSearchLabel) {
-      if (data.available) {
-        webSearchLabel.style.display = "flex";
-        webSearchLabel.title = `Real-time web search powered by ${data.provider}`;
-      } else {
-        webSearchLabel.style.display = "none";
-      }
+      webSearchLabel.style.display = "flex";
+      const data = response.ok ? await response.json() : null;
+      webSearchLabel.title = data?.available
+        ? `Real-time web search powered by ${data.provider}`
+        : "Web search enabled. Uses DuckDuckGo (direct or MCP bridge).";
     }
   } catch (error) {
     console.error("Failed to check web search availability:", error);

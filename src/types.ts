@@ -32,6 +32,9 @@ export interface Env {
    * Resend API key for email delivery
    */
   RESEND_API_KEY: string;
+  OPENAI_API_KEY?: string;
+  OPENAI_BASE_URL?: string;
+  OPENAI_MODEL?: string;
 }
 
 /**

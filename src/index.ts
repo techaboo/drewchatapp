@@ -245,6 +245,8 @@ const MODEL_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 // Local Ollama configuration
 const OLLAMA_BASE_URL = "http://localhost:11434";
 const OLLAMA_MODEL = "llama3.2:1b";
+const OPENAI_BASE_URL = "https://api.openai.com/v1";
+const OPENAI_MODEL = "gpt-4o-mini";
 
 // Default system prompt
 const SYSTEM_PROMPT =
@@ -309,7 +311,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method === "GET") {
-        return handleListModels();
+        return handleListModels(env);
       }
       return new Response("Method not allowed", { status: 405 });
     }
@@ -370,17 +372,9 @@ export default {
       return new Response("Method not allowed", { status: 405 });
     }
 
-    if (url.pathname === "/api/search/status") {
+if (url.pathname === "/api/search/status") {
       if (request.method === "GET") {
-        return new Response(
-          JSON.stringify({ 
-            available: false,
-            provider: "disabled"
-          }),
-          {
-            headers: { "Content-Type": "application/json" },
-          },
-        );
+        return handleSearchStatus()
       }
       return new Response("Method not allowed", { status: 405 });
     }
@@ -414,8 +408,9 @@ async function handleChatRequest(
 
     // Determine which model to use
     const requestedModel = model || selectedModel;
-    const isWorkersAiModel = requestedModel && requestedModel.startsWith("@cf/");
-    
+    const isWorkersAiModel = requestedModel.startsWith("@cf/");
+    const isOpenAiModel = requestedModel.startsWith("openai/");
+
     // Check if Ollama is available for local development
     const useOllama = await isOllamaAvailable();
 
@@ -437,15 +432,23 @@ async function handleChatRequest(
       }
     }
 
-    // Use Workers AI if requested model is a cloud model OR if Ollama is not available
+    if (isOpenAiModel) {
+      if (!env.OPENAI_API_KEY) {
+        return new Response(JSON.stringify({ error: "OpenAI provider is not configured" }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return await handleOpenAiRequest(messages, requestedModel.slice("openai/".length), env);
+    }
+
     if (isWorkersAiModel || !useOllama) {
       const workersModel = isWorkersAiModel ? requestedModel : MODEL_ID;
       console.log("Using Cloudflare Workers AI model:", workersModel);
       return await handleWorkersAiRequest(messages, workersModel, env);
     }
 
-    // Use Ollama for local models
-    const ollamaModel = requestedModel ?? OLLAMA_MODEL;
+    const ollamaModel = requestedModel || OLLAMA_MODEL;
     console.log("Using local Ollama model:", ollamaModel);
     return await handleOllamaRequest(messages, ollamaModel);
   } catch (error) {
@@ -660,6 +663,58 @@ async function handleWorkersAiRequest(
 /**
  * Handles requests to Ollama local server
  */
+async function handleOpenAiRequest(
+  messages: ChatMessage[],
+  model: string,
+  env: Env,
+): Promise<Response> {
+  const response = await fetch(`${env.OPENAI_BASE_URL || OPENAI_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({ model: model || env.OPENAI_MODEL || OPENAI_MODEL, messages, stream: true }),
+  });
+
+  if (!response.ok || !response.body) {
+    return new Response(JSON.stringify({ error: await response.text() }), {
+      status: response.status || 502,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      const text = decoder.decode(value, { stream: true });
+      for (const line of text.split("\\n")) {
+        if (!line.startsWith("data: ") || line === "data: [DONE]") continue;
+        try {
+          const chunk = JSON.parse(line.slice(6)).choices?.[0]?.delta?.content;
+          if (chunk) controller.enqueue(encoder.encode(JSON.stringify({ response: chunk }) + "\\n"));
+        } catch {
+          continue;
+        }
+      }
+    },
+    cancel() {
+      reader.cancel();
+    },
+  });
+
+  return new Response(stream, {
+    headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache" },
+  });
+}
+
 async function handleOllamaRequest(
   messages: ChatMessage[],
   model: string,
@@ -770,6 +825,28 @@ async function handleOllamaRequest(
 /**
  * Performs web search using SearXNG public instance (no API key needed)
  */
+async function handleSearchStatus(): Promise<Response> {
+  const bridgeUp = await isMcpBridgeAvailable();
+  return new Response(
+    JSON.stringify({
+      available: bridgeUp,
+      provider: bridgeUp ? "mcp-bridge (DuckDuckGo)" : "disabled",
+    }),
+    { headers: { "Content-Type": "application/json" } },
+  );
+}
+
+async function isMcpBridgeAvailable(): Promise<boolean> {
+  try {
+    const response = await fetch(`http://localhost:3001/health`, {
+      signal: AbortSignal.timeout(1200),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function performWebSearch(query: string): Promise<string> {
   try {
     console.log(`🔍 Calling MCP bridge for search: "${query}"`);
@@ -790,25 +867,53 @@ async function performWebSearch(query: string): Promise<string> {
       throw new Error(`Bridge server error: ${response.statusText}`);
     }
 
-    const data = await response.json() as { query: string; results: string; timestamp: string };
-    
+const data = await response.json() as { query: string; results: string; timestamp: string };
+
     if (!data.results || data.results.trim() === '') {
       return "No search results found.";
     }
 
-    console.log(`✅ Web search completed via MCP bridge`);
+    console.log(`? Web search completed via MCP bridge`);
     return data.results;
   } catch (error) {
-    console.error("❌ Web search error:", error);
-    // Return error but don't crash - AI can still try to answer
-    return "Web search temporarily unavailable. Make sure the MCP bridge server is running (npm start in mcp-bridge/).";
+    console.warn("? MCP bridge unavailable, falling back to direct DuckDuckGo search:", error instanceof Error ? error.message : String(error));
+    return performDirectDuckDuckGoSearch(query);
+  }
+}
+
+async function performDirectDuckDuckGoSearch(query: string): Promise<string> {
+  try {
+    const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const html = await response.text();
+    const results = Array.from(html.matchAll(/class="result__a"[^>]*href="([^"]+)"[^>]*[>]([^<]+)</g))
+      .slice(0, 5)
+      .map((m) => `- ${m[2].trim().replace(/&#x27;/g, "'")}: ${m[1]}`)
+      .join("\n");
+    if (!results) return "No search results found.";
+    console.log("? Web search completed via direct DuckDuckGo fallback");
+    return results;
+  } catch (directError) {
+    console.error("? Direct DuckDuckGo fallback also failed:", directError);
+return "Web search temporarily unavailable. Make sure the MCP bridge server is running (npm start in mcp-bridge/).";
   }
 }
 
 /**
  * List available and installed Ollama models, fallback to Workers AI
  */
-async function handleListModels(): Promise<Response> {
+function envConfiguredOpenAiModels(): Array<{ name: string; description: string; size: null }> {
+  return [{
+    name: `openai/${OPENAI_MODEL}`,
+    description: "OpenAI-compatible provider (configure OPENAI_API_KEY)",
+    size: null,
+  }];
+}
+
+async function handleListModels(env: Env): Promise<Response> {
   const useOllama = await isOllamaAvailable();
 
   if (useOllama) {
@@ -851,7 +956,7 @@ async function handleListModels(): Promise<Response> {
         JSON.stringify({
           available: true,
           installedModels: data.models,
-          availableModels,
+          availableModels: [...availableModels, ...envConfiguredOpenAiModels()],
           currentModel: selectedModel,
         }),
         {
@@ -959,15 +1064,15 @@ async function handleListModels(): Promise<Response> {
     },
   ];
 
-  // Return the currently selected model if it's a Workers AI model, otherwise use default
-  const currentModel = selectedModel.startsWith("@cf/") ? selectedModel : MODEL_ID;
+  const configuredModels = envConfiguredOpenAiModels();
+  const currentModel = selectedModel.startsWith("@cf/") || selectedModel.startsWith("openai/") ? selectedModel : MODEL_ID;
 
   return new Response(
     JSON.stringify({
       available: false,
       installedModels: [],
-      availableModels: workersAiModels,
-      currentModel: currentModel,
+      availableModels: [...workersAiModels, ...configuredModels],
+      currentModel,
     }),
     {
       headers: { "Content-Type": "application/json" },
